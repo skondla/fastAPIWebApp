@@ -1,0 +1,27 @@
+<!-- templates/signup.html -->
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="column is-8 is-offset-2">
+    <h3 class="title">Restore Status</h3>
+        Welcome, {{ current_user.name }}!. Client Address: {{request.remote_addr}}
+    <div class="box" size="120">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="notification is-danger">
+                {{ messages[0] }}. Go to <a href="{{ url_for('auth.login') }}">login page</a>.
+            </div>
+        {% endif %}
+        {% endwith %}
+        <form method="POST" action="/status">
+                Snapshot Name:<br>
+                <input type="text" name="snapshotname" placeholder="New Database Name"size="75" style="color:Blue;"><br>
+                EndPoint Name:<br>
+                <input type="text" name="endpoint" placeholder="Original DB Endpoint" size="75" style="color:brown;"> <br><br>
+                <input type="submit" value="Submit" style="color:green">
+                <input type="reset" style="color:red">
+        </form>
+    </div>
+</div>
+{% endblock %}
