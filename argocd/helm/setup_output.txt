@@ -1,0 +1,31 @@
+helm install my-release oci://registry-1.docker.io/bitnamicharts/argo-workflows
+Pulled: registry-1.docker.io/bitnamicharts/argo-workflows:5.3.6
+Digest: sha256:eca6aa783e9064f206d98682a2bca876297d0de14d17729f331556eea6c2eb57
+NAME: my-release
+LAST DEPLOYED: Tue Jul  4 21:50:30 2023
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+CHART NAME: argo-workflows
+CHART VERSION: 5.3.6
+APP VERSION: 3.4.8
+
+** Please be patient while the chart is being deployed **
+
+Obtain the Argo Workflows UI URL:
+
+  kubectl port-forward --namespace default svc/my-release-argo-workflows-server 8080:80 &
+  echo "Argo Workflows UI URL: http://127.0.0.1:8080/"
+
+Obtain the Argo Workflows access token:
+
+  SECRET=$(kubectl get sa my-release-argo-workflows-server -o=jsonpath='{.secrets[0].name}')
+  ARGO_TOKEN="Bearer $(kubectl get secret $SECRET -o=jsonpath='{.data.token}' | base64 -d)"
+  echo "$ARGO_TOKEN"
+
+
+#if secret fails
+
+k create secret generic argo-secret --from-literal=username=skondla --from-literal=password=aFaKSQ4p9w2CqiwaAjEppUN33vHAqG242cshQR3VvduN22PunO0hpt8sio7m6sOE

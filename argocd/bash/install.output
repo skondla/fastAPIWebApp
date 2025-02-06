@@ -1,0 +1,327 @@
+(base) skondla@Sams-MBP:Downloads $ kubectl create namespace argocd
+namespace/argocd created
+(base) skondla@Sams-MBP:Downloads $ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+customresourcedefinition.apiextensions.k8s.io/applications.argoproj.io created
+customresourcedefinition.apiextensions.k8s.io/applicationsets.argoproj.io created
+customresourcedefinition.apiextensions.k8s.io/appprojects.argoproj.io created
+serviceaccount/argocd-application-controller created
+serviceaccount/argocd-applicationset-controller created
+serviceaccount/argocd-dex-server created
+serviceaccount/argocd-notifications-controller created
+serviceaccount/argocd-redis created
+serviceaccount/argocd-repo-server created
+serviceaccount/argocd-server created
+role.rbac.authorization.k8s.io/argocd-application-controller created
+role.rbac.authorization.k8s.io/argocd-applicationset-controller created
+role.rbac.authorization.k8s.io/argocd-dex-server created
+role.rbac.authorization.k8s.io/argocd-notifications-controller created
+role.rbac.authorization.k8s.io/argocd-server created
+clusterrole.rbac.authorization.k8s.io/argocd-application-controller created
+clusterrole.rbac.authorization.k8s.io/argocd-server created
+rolebinding.rbac.authorization.k8s.io/argocd-application-controller created
+rolebinding.rbac.authorization.k8s.io/argocd-applicationset-controller created
+rolebinding.rbac.authorization.k8s.io/argocd-dex-server created
+rolebinding.rbac.authorization.k8s.io/argocd-notifications-controller created
+rolebinding.rbac.authorization.k8s.io/argocd-redis created
+rolebinding.rbac.authorization.k8s.io/argocd-server created
+clusterrolebinding.rbac.authorization.k8s.io/argocd-application-controller created
+clusterrolebinding.rbac.authorization.k8s.io/argocd-server created
+configmap/argocd-cm created
+configmap/argocd-cmd-params-cm created
+configmap/argocd-gpg-keys-cm created
+configmap/argocd-notifications-cm created
+configmap/argocd-rbac-cm created
+configmap/argocd-ssh-known-hosts-cm created
+configmap/argocd-tls-certs-cm created
+secret/argocd-notifications-secret created
+secret/argocd-secret created
+service/argocd-applicationset-controller created
+service/argocd-dex-server created
+service/argocd-metrics created
+service/argocd-notifications-controller-metrics created
+service/argocd-redis created
+service/argocd-repo-server created
+service/argocd-server created
+service/argocd-server-metrics created
+deployment.apps/argocd-applicationset-controller created
+deployment.apps/argocd-dex-server created
+deployment.apps/argocd-notifications-controller created
+deployment.apps/argocd-redis created
+deployment.apps/argocd-repo-server created
+deployment.apps/argocd-server created
+statefulset.apps/argocd-application-controller created
+networkpolicy.networking.k8s.io/argocd-application-controller-network-policy created
+networkpolicy.networking.k8s.io/argocd-applicationset-controller-network-policy created
+networkpolicy.networking.k8s.io/argocd-dex-server-network-policy created
+networkpolicy.networking.k8s.io/argocd-notifications-controller-network-policy created
+networkpolicy.networking.k8s.io/argocd-redis-network-policy created
+networkpolicy.networking.k8s.io/argocd-repo-server-network-policy created
+networkpolicy.networking.k8s.io/argocd-server-network-policy created
+(base) skondla@Sams-MBP:Downloads $ k get bs
+error: the server doesn't have a resource type "bs"
+(base) skondla@Sams-MBP:Downloads $ k get ns
+NAME                  STATUS   AGE
+argocd                Active   18s
+default               Active   42h
+flaskapp1-namespace   Active   42h
+kube-node-lease       Active   42h
+kube-public           Active   42h
+kube-system           Active   42h
+linkerd               Active   42h
+(base) skondla@Sams-MBP:Downloads $ k get po -n argocd
+NAME                                                READY   STATUS              RESTARTS   AGE
+argocd-application-controller-0                     0/1     ContainerCreating   0          14s
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running             0          15s
+argocd-dex-server-59f89468dc-rkctq                  0/1     Init:0/1            0          15s
+argocd-notifications-controller-55565589db-lt5rh    0/1     ContainerCreating   0          15s
+argocd-redis-74cb89f466-gsrnc                       0/1     ContainerCreating   0          15s
+argocd-repo-server-68444f6479-7fzpv                 0/1     Init:0/1            0          15s
+argocd-server-579f659dd5-dxmsz                      0/1     ContainerCreating   0          15s
+(base) skondla@Sams-MBP:Downloads $ k get po -n argocd
+NAME                                                READY   STATUS              RESTARTS   AGE
+argocd-application-controller-0                     0/1     ContainerCreating   0          18s
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running             0          19s
+argocd-dex-server-59f89468dc-rkctq                  0/1     Init:0/1            0          19s
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running             0          19s
+argocd-redis-74cb89f466-gsrnc                       0/1     ContainerCreating   0          19s
+argocd-repo-server-68444f6479-7fzpv                 0/1     Init:0/1            0          19s
+argocd-server-579f659dd5-dxmsz                      0/1     ContainerCreating   0          19s
+(base) skondla@Sams-MBP:Downloads $ k get po -n argocd
+NAME                                                READY   STATUS            RESTARTS   AGE
+argocd-application-controller-0                     0/1     Running           0          23s
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running           0          24s
+argocd-dex-server-59f89468dc-rkctq                  0/1     PodInitializing   0          24s
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running           0          24s
+argocd-redis-74cb89f466-gsrnc                       1/1     Running           0          24s
+argocd-repo-server-68444f6479-7fzpv                 0/1     Running           0          24s
+argocd-server-579f659dd5-dxmsz                      0/1     Running           0          24s
+(base) skondla@Sams-MBP:Downloads $ k get po -n argocd
+NAME                                                READY   STATUS    RESTARTS   AGE
+argocd-application-controller-0                     0/1     Running   0          25s
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running   0          26s
+argocd-dex-server-59f89468dc-rkctq                  1/1     Running   0          26s
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running   0          26s
+argocd-redis-74cb89f466-gsrnc                       1/1     Running   0          26s
+argocd-repo-server-68444f6479-7fzpv                 0/1     Running   0          26s
+argocd-server-579f659dd5-dxmsz                      0/1     Running   0          26s
+(base) skondla@Sams-MBP:Downloads $ kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+service/argocd-server patched
+(base) skondla@Sams-MBP:Downloads $ kubectl port-forward svc/argocd-server -n argocd 8080:443
+Forwarding from 127.0.0.1:8080 -> 8080
+Forwarding from [::1]:8080 -> 8080
+
+
+(base) skondla@Sams-MBP:bash $ brew install argocd
+(base) skondla@Sams-MBP:bash $ argocd admin initial-password -n argocd
+INSvDJwPss2AYVux
+
+ This password must be only used for first time login. We strongly recommend you update the password using `argocd account update-password`.
+(base) skondla@Sams-MBP:bash $ k get po -n argocd
+NAME                                                READY   STATUS    RESTARTS   AGE
+argocd-application-controller-0                     1/1     Running   0          11m
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running   0          11m
+argocd-dex-server-59f89468dc-rkctq                  1/1     Running   0          11m
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running   0          11m
+argocd-redis-74cb89f466-gsrnc                       1/1     Running   0          11m
+argocd-repo-server-68444f6479-7fzpv                 1/1     Running   0          11m
+argocd-server-579f659dd5-dxmsz                      1/1     Running   0          11m
+(base) skondla@Sams-MBP:bash $ k get svc -n argocd
+NAME                                      TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+argocd-applicationset-controller          ClusterIP      10.96.29.140   <none>          7000/TCP,8080/TCP            11m
+argocd-dex-server                         ClusterIP      10.96.17.200   <none>          5556/TCP,5557/TCP,5558/TCP   11m
+argocd-metrics                            ClusterIP      10.96.28.180   <none>          8082/TCP                     11m
+argocd-notifications-controller-metrics   ClusterIP      10.96.31.87    <none>          9001/TCP                     11m
+argocd-redis                              ClusterIP      10.96.28.133   <none>          6379/TCP                     11m
+argocd-repo-server                        ClusterIP      10.96.20.179   <none>          8081/TCP,8084/TCP            11m
+argocd-server                             LoadBalancer   10.96.24.174   35.186.170.26   80:32501/TCP,443:30269/TCP   11m
+argocd-server-metrics                     ClusterIP      10.96.20.80    <none>          8083/TCP                     11m
+(base) skondla@Sams-MBP:bash $ argocd login 35.186.170.26
+WARNING: server certificate had error: tls: failed to verify certificate: x509: certificate signed by unknown authority. Proceed insecurely (y/n)? y
+Username: admin
+Password:
+'admin:login' logged in successfully
+FATA[0019] mkdir /Users/skondla/.config/argocd: permission denied
+(base) skondla@Sams-MBP:bash $ mkdir /Users/skondla/.config/argocd
+mkdir: /Users/skondla/.config/argocd: Permission denied
+(base) skondla@Sams-MBP:bash $ sudo mkdir /Users/skondla/.config/argocd
+Password:
+Sorry, try again.
+Password:
+(base) skondla@Sams-MBP:bash $ sudo mkdir /Users/skondla/.config/argocd
+mkdir: /Users/skondla/.config/argocd: File exists
+(base) skondla@Sams-MBP:bash $ sudo chown /Users/skondla/.config/argocd skondla:staff
+chown: /Users/skondla/.config/argocd: illegal user name
+(base) skondla@Sams-MBP:bash $ id
+uid=501(skondla) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),98(_lpadmin),701(com.apple.sharepoint.group.1),33(_appstore),100(_lpoperator),204(_developer),250(_analyticsusers),395(com.apple.access_ftp),398(com.apple.access_screensharing),399(com.apple.access_ssh),400(com.apple.access_remote_ae),702(com.apple.sharepoint.group.2)
+(base) skondla@Sams-MBP:bash $ sudo chown skondla:staff /Users/skondla/.config/argocd
+(base) skondla@Sams-MBP:bash $ argocd login 35.186.170.26
+WARNING: server certificate had error: tls: failed to verify certificate: x509: certificate signed by unknown authority. Proceed insecurely (y/n)? y
+Username: admin
+Password:
+'admin:login' logged in successfully
+Context '35.186.170.26' updated
+
+
+(base) skondla@Sams-MBP:bash $ argocd account update-password
+*** Enter password of currently logged in user (admin):
+*** Enter new password for user admin:
+*** Confirm new password for user admin:
+FATA[0039] rpc error: code = Unknown desc = New password does not match the following expression: ^.{8,32}$.
+(base) skondla@Sams-MBP:bash $ argocd account update-password
+*** Enter password of currently logged in user (admin):
+*** Enter new password for user admin:
+*** Confirm new password for user admin:
+Password updated
+Context '35.186.170.26' updated
+(base) skondla@Sams-MBP:bash $
+
+
+(base) skondla@Sams-MBP:bash $ echo "ARGOCD_ADMIN: a6ZOqhAMJW1YY7zcXQf" >> ~/.secrets
+(base) skondla@Sams-MBP:bash $ cat ~/.secrets
+AWS_ACCOUNT_ID: 635125955082
+PG_ROOT: c2tvbmRsYV9mbGFza2FwcF9kYl9wYXNzd29yZAo=
+ARGOCD_ADMIN: a6ZOqhAMJW1YY7zcXQf
+(base) skondla@Sams-MBP:bash $ kubectl config get-contexts -o name
+arn:aws:eks:us-east-1:635125955082:cluster/webapps-demo
+gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster
+k3d-devhacluster
+webapps
+(base) skondla@Sams-MBP:bash $ argocd cluster add gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster
+WARNING: This will create a service account `argocd-manager` on the cluster referenced by context `gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster` with full cluster level privileges. Do you want to continue [y/N]? y
+INFO[0006] ServiceAccount "argocd-manager" created in namespace "kube-system"
+INFO[0006] ClusterRole "argocd-manager-role" created
+INFO[0006] ClusterRoleBinding "argocd-manager-role-binding" created
+INFO[0011] Created bearer token secret for ServiceAccount "argocd-manager"
+Cluster 'https://34.85.253.169' added
+
+
+(base) skondla@Sams-MBP:bash $ kubectl config set-context --current --namespace=argocd
+Context "gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster" modified.
+(base) skondla@Sams-MBP:bash $ k config get-contexts
+CURRENT   NAME                                                           CLUSTER                                                        AUTHINFO                                                       NAMESPACE
+          arn:aws:eks:us-east-1:635125955082:cluster/webapps-demo        arn:aws:eks:us-east-1:635125955082:cluster/webapps-demo        arn:aws:eks:us-east-1:635125955082:cluster/webapps-demo
+*         gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster   gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster   gke_igneous-spanner-385916_us-east4-a_flaskapp1-demo-cluster   argocd
+          k3d-devhacluster                                               k3d-devhacluster                                               admin@k3d-devhacluster
+          webapps                                                        webapps                                                        clusterUser_webapps_webapps
+(base) skondla@Sams-MBP:bash $ argocd app create guestbook --repo https://github.com/argoproj/argocd-example-apps.git --path guestbook --dest-server https://kubernetes.default.svc --dest-namespace default
+application 'guestbook' created
+(base) skondla@Sams-MBP:bash $ k get svc -n argocd
+NAME                                      TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+argocd-applicationset-controller          ClusterIP      10.96.29.140   <none>          7000/TCP,8080/TCP            22m
+argocd-dex-server                         ClusterIP      10.96.17.200   <none>          5556/TCP,5557/TCP,5558/TCP   22m
+argocd-metrics                            ClusterIP      10.96.28.180   <none>          8082/TCP                     22m
+argocd-notifications-controller-metrics   ClusterIP      10.96.31.87    <none>          9001/TCP                     22m
+argocd-redis                              ClusterIP      10.96.28.133   <none>          6379/TCP                     22m
+argocd-repo-server                        ClusterIP      10.96.20.179   <none>          8081/TCP,8084/TCP            22m
+argocd-server                             LoadBalancer   10.96.24.174   35.186.170.26   80:32501/TCP,443:30269/TCP   22m
+argocd-server-metrics                     ClusterIP      10.96.20.80    <none>          8083/TCP                     22m
+(base) skondla@Sams-MBP:bash $ argocd app get guestbook
+Name:               argocd/guestbook
+Project:            default
+Server:             https://kubernetes.default.svc
+Namespace:          default
+URL:                https://35.186.170.26/applications/guestbook
+Repo:               https://github.com/argoproj/argocd-example-apps.git
+Target:
+Path:               guestbook
+SyncWindow:         Sync Allowed
+Sync Policy:        <none>
+Sync Status:        Synced to  (53e28ff)
+Health Status:      Healthy
+
+GROUP  KIND        NAMESPACE  NAME          STATUS  HEALTH   HOOK  MESSAGE
+       Service     default    guestbook-ui  Synced  Healthy        service/guestbook-ui serverside-applied (dry run)
+apps   Deployment  default    guestbook-ui  Synced  Healthy        deployment.apps/guestbook-ui serverside-applied (dry run)
+(base) skondla@Sams-MBP:bash $ k get po
+NAME                                                READY   STATUS    RESTARTS   AGE
+argocd-application-controller-0                     1/1     Running   0          37m
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running   0          37m
+argocd-dex-server-59f89468dc-rkctq                  1/1     Running   0          37m
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running   0          37m
+argocd-redis-74cb89f466-gsrnc                       1/1     Running   0          37m
+argocd-repo-server-68444f6479-7fzpv                 1/1     Running   0          37m
+argocd-server-579f659dd5-dxmsz                      1/1     Running   0          37m
+(base) skondla@Sams-MBP:bash $ k get po -n argocd
+NAME                                                READY   STATUS    RESTARTS   AGE
+argocd-application-controller-0                     1/1     Running   0          37m
+argocd-applicationset-controller-69dbc8585c-l9lc5   1/1     Running   0          37m
+argocd-dex-server-59f89468dc-rkctq                  1/1     Running   0          37m
+argocd-notifications-controller-55565589db-lt5rh    1/1     Running   0          37m
+argocd-redis-74cb89f466-gsrnc                       1/1     Running   0          37m
+argocd-repo-server-68444f6479-7fzpv                 1/1     Running   0          37m
+argocd-server-579f659dd5-dxmsz                      1/1     Running   0          37m
+(base) skondla@Sams-MBP:bash $ argocd app get guestbook
+Name:               argocd/guestbook
+Project:            default
+Server:             https://kubernetes.default.svc
+Namespace:          default
+URL:                https://35.186.170.26/applications/guestbook
+Repo:               https://github.com/argoproj/argocd-example-apps.git
+Target:
+Path:               guestbook
+SyncWindow:         Sync Allowed
+Sync Policy:        <none>
+Sync Status:        Synced to  (53e28ff)
+Health Status:      Healthy
+
+GROUP  KIND        NAMESPACE  NAME          STATUS  HEALTH   HOOK  MESSAGE
+       Service     default    guestbook-ui  Synced  Healthy        service/guestbook-ui serverside-applied (dry run)
+apps   Deployment  default    guestbook-ui  Synced  Healthy        deployment.apps/guestbook-ui serverside-applied (dry run)
+(base) skondla@Sams-MBP:bash $
+(base) skondla@Sams-MBP:bash $
+(base) skondla@Sams-MBP:bash $ k get svc
+NAME                                      TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+argocd-applicationset-controller          ClusterIP      10.96.29.140   <none>          7000/TCP,8080/TCP            117m
+argocd-dex-server                         ClusterIP      10.96.17.200   <none>          5556/TCP,5557/TCP,5558/TCP   117m
+argocd-metrics                            ClusterIP      10.96.28.180   <none>          8082/TCP                     117m
+argocd-notifications-controller-metrics   ClusterIP      10.96.31.87    <none>          9001/TCP                     117m
+argocd-redis                              ClusterIP      10.96.28.133   <none>          6379/TCP                     117m
+argocd-repo-server                        ClusterIP      10.96.20.179   <none>          8081/TCP,8084/TCP            117m
+argocd-server                             LoadBalancer   10.96.24.174   35.186.170.26   80:32501/TCP,443:30269/TCP   117m
+argocd-server-metrics                     ClusterIP      10.96.20.80    <none>          8083/TCP                     117m
+(base) skondla@Sams-MBP:bash $ k get svc -n argocd
+NAME                                      TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+argocd-applicationset-controller          ClusterIP      10.96.29.140   <none>          7000/TCP,8080/TCP            117m
+argocd-dex-server                         ClusterIP      10.96.17.200   <none>          5556/TCP,5557/TCP,5558/TCP   117m
+argocd-metrics                            ClusterIP      10.96.28.180   <none>          8082/TCP                     117m
+argocd-notifications-controller-metrics   ClusterIP      10.96.31.87    <none>          9001/TCP                     117m
+argocd-redis                              ClusterIP      10.96.28.133   <none>          6379/TCP                     117m
+argocd-repo-server                        ClusterIP      10.96.20.179   <none>          8081/TCP,8084/TCP            117m
+argocd-server                             LoadBalancer   10.96.24.174   35.186.170.26   80:32501/TCP,443:30269/TCP   117m
+argocd-server-metrics                     ClusterIP      10.96.20.80    <none>          8083/TCP                     117m
+(base) skondla@Sams-MBP:bash $ curl -Lk https://35.186.170.26:443/
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><title>Argo CD</title><base href="/"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/png" href="assets/favicon/favicon-32x32.png" sizes="32x32"/><link rel="icon" type="image/png" href="assets/favicon/favicon-16x16.png" sizes="16x16"/><link href="assets/fonts.css" rel="stylesheet"><script defer="defer" src="main.b9cc0848a3a3b1aa5306.js"></script></head><body><noscript><p>Your browser does not support JavaScript. Please enable JavaScript to view the site. Alternatively, Argo CD can be used with the <a href="https://argoproj.github.io/argo-cd/cli_installation/">Argo CD CLI</a>.</p></noscript><div id="app"></div></body><script defer="defer" src="extensions.js"></script></html>(base) skondla@Sams-MBP:bash $
+(base) skondla@Sams-MBP:bash $
+(base) skondla@Sams-MBP:bash $
+(base) skondla@Sams-MBP:bash $
+
+
+(base) skondla@Sams-MBP:bash $ cat > ingress.yaml <<EOF
+> apiVersion: networking.k8s.io/v1
+> kind: Ingress
+> metadata:
+>   name: argocd-server-ingress
+>   namespace: argocd
+>   annotations:
+>     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+>     nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+> spec:
+>   ingressClassName: "nginx"
+>   rules:
+>   - host: argocd.example.com
+>     http:
+>       paths:
+>       - path: /
+>         pathType: Prefix
+>         backend:
+>           service:
+>             name: argocd-server
+>             port:
+>               name: https
+> EOF
+(base) skondla@Sams-MBP:bash $ kubectl apply -f ingress.yaml -n argocd
+ingress.networking.k8s.io/argocd-server-ingress unchanged
+(base) skondla@Sams-MBP:bash $ k get ingress -n argocd
+NAME                    CLASS   HOSTS                ADDRESS   PORTS   AGE
+argocd-server-ingress   nginx   argocd.example.com             80      2m56s
+

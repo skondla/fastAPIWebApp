@@ -1,0 +1,49 @@
+<!-- templates/signup.html -->
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="column is-8 is-offset-2">
+    <h3 class="title">Attach DB instance to the DB Cluster</h3>
+        Welcome, {{ current_user.name }}!. Client Address: {{request.remote_addr}}
+    <div class="box" size="120">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="notification is-danger">
+                {{ messages[0] }}. Go to <a href="{{ url_for('auth.login') }}">login page</a>.
+            </div>
+        {% endif %}
+        {% endwith %}
+        <form method="POST" action="/attachdb">
+                DB Endpoint:<br>
+                <input type="text" name="endpoint" placeholder="DB Endpoint" size="75" style="color:Blue;"><br>
+                Instance Class:<br>
+                <!--
+                <input type="text" name="instanceclass" placeholder="Instance Class" size="75" style="color:darkgreen;"> <br><br> -->
+                <select class="form-control" id="instanceclass" name="instanceclass">
+                    <option value="db.t3.micro">db.t3.micro</option>
+                    <option value="db.t3.small" selected>db.t3.small</option>
+                    <option value="db.t3.xlarge">db.t3.xlarge</option>
+                    <option value="db.t3.2xlarge">db.t3.2xlarge</option>
+                    <option value="db.t2.micro">db.t2.micro</option>
+                    <option value="db.t2.small">db.t2.small</option>
+                    <option value="db.t2.medium">db.t2.medium</option>
+                    <option value="db.t2.large">db.t2.large</option>
+                    <option value="db.t2.2xlarge">db.t2.2xlarge</option>
+                    <option value="db.m5.large">db.m5.large</option>
+                    <option value="db.m5.xlarge">db.m5.xlarge</option>
+                    <option value="db.m5.2xlarge">db.m5.2xlarge</option>
+                    <option value="db.m5.4xlarge">db.m5.4xlarge</option>
+                    <option value="db.r5.large">db.r5.large</option>
+                    <option value="db.r5.xlarge">db.r5.xlarge</option>
+                    <option value="db.r5.2xlarge">db.r5.2xlarge</option>
+                    <option value="db.r5.4xlarge">db.r5.4xlarge</option>
+                    <option value="db.r5.8xlarge">db.r5.8xlarge</option>
+                </select>
+                <br><br>
+                <input type="submit" value="Submit" style="color:green">
+                <input type="reset" style="color:red">
+        </form>
+    </div>
+</div>
+{% endblock %}
