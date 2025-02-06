@@ -1,17 +1,17 @@
 # fastAPIWebApp
-[![license](https://img.shields.io/github/license/mashape/apistatus.svg?maxAge=2592000)](https://github.com/skondla/Fast APIAPIWebApp/blob/main/LICENSE)
+[![license](https://img.shields.io/github/license/mashape/apistatus.svg?maxAge=2592000)](https://github.com/skondla/flaskAPIWebApp/blob/main/LICENSE)
 [![slack](https://img.shields.io/badge/slack-chat-yellow)](https://join.slack.com/t/devops-zwf1016/shared_invite/zt-1wsafgivm-iI88~ZqZBaKGzYhD8N2JsA)
-[![CICD](https://github.com/skondla/Fast APIAPIWebApp/actions/workflows/Deploy-GKE-Fast APIAdminApp.yml/badge.svg?event=push)](https://github.com/skondla/Fast APIAPIWebApp/actions)
-[![CICD](https://github.com/skondla/Fast APIAPIWebApp/actions/workflows/Deploy-GKE-Fast APIUserApp.yml/badge.svg?event=push)](https://github.com/skondla/Fast APIAPIWebApp/actions)
-[![CICD](https://github.com/skondla/Fast APIAPIWebApp/actions/workflows/Deploy-EKS-ADMIN.yml/badge.svg?event=push)](https://github.com/skondla/Fast APIAPIWebApp/actions)
-[![CICD](https://github.com/skondla/Fast APIAPIWebApp/actions/workflows/Deploy-EKS-USER.yml/badge.svg?event=push)](https://github.com/skondla/Fast APIAPIWebApp/actions)
+[![CICD](https://github.com/skondla/flaskAPIWebApp/actions/workflows/Deploy-GKE-flaskAdminApp.yml/badge.svg?event=push)](https://github.com/skondla/flaskAPIWebApp/actions)
+[![CICD](https://github.com/skondla/flaskAPIWebApp/actions/workflows/Deploy-GKE-flaskUserApp.yml/badge.svg?event=push)](https://github.com/skondla/flaskAPIWebApp/actions)
+[![CICD](https://github.com/skondla/flaskAPIWebApp/actions/workflows/Deploy-EKS-ADMIN.yml/badge.svg?event=push)](https://github.com/skondla/flaskAPIWebApp/actions)
+[![CICD](https://github.com/skondla/flaskAPIWebApp/actions/workflows/Deploy-EKS-USER.yml/badge.svg?event=push)](https://github.com/skondla/flaskAPIWebApp/actions)
 [![Twitter Follow](https://img.shields.io/twitter/follow/skondla?style=social)](https://twitter.com/skondla)
 
 The web interface (HTML) or CURL command can be used to request for
 1. Restoring a database instance from cluster and non-cluster database instances
 2. Checking the status of the restore from step 1.
 3. Attaching an instances to already existing dB cluster
-4. The API app is written in Python using Fast API Web Frame work and blueprints with API endpoints called routes.
+4. The API app is written in Python using Flask Web Frame work and blueprints with API endpoints called routes.
 
 Request website credentials (Signup/Login):
 
@@ -27,7 +27,7 @@ Functionality: The web interface (HTML) or CURL command can be used to request f
 1. Restoring a database instance (AWS/RDS) from cluster and non-cluster database instances
 2. Checking the status of the restore from step 1.
 3. Attaching an instances to already existing dB cluster 
-4. The API app is written in Python using Fast API Web Frame work and blueprints with API endpoints called routes.
+4. The API app is written in Python using Flask Web Frame work and blueprints with API endpoints called routes.
 
 
 Fast API Python Curl command: (how to use)
@@ -155,7 +155,7 @@ PASSWORD=`cat ~/.password/mySecrets2 | grep password | awk '{print $2}'`
  
 rm -f cookies.txt
 ```
-Python Fast API Web Interface:
+Python Flask Web Interface:
 
 Sign Up page: 
 
