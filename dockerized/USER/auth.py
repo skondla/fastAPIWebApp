@@ -96,6 +96,56 @@ def db_restore(snapshot_name, db_url):
         db_info = RDSDescribe().dbInstanceInfo(db_url)
         return RDSRestore().restore_db_instance_from_db_snapshot(snapshot_name, snapshot_name, *db_info[:6])
 
+def db_attach(db_url: str, instance_class: str):
+    instance_name = db_url.split('.')[0]
+    cluster_name = instance_name
+    today = datetime.datetime.now().strftime("%m%d-%H%M")
+    instance_name = f"{instance_name}-{today}"
+
+    get_db_info = RDSDescribe().dbInstanceInfo(db_url)
+    db_security_group, db_subnet, engine, database, engine_version = map(str, get_db_info[:5])
+
+    print(f"instanceName: {instance_name}")
+    print(f"engine: {engine}")
+    print(f"engineVersion: {engine_version}")
+    print(f"instanceClass: {instance_class}")
+    print(f"clusterName: {cluster_name}")
+
+    return RDSCreate().create_db_cluster_instance(
+        instance_name, cluster_name, engine, engine_version, instance_class
+    )
+
+@auth_router.post("/attachdb")
+async def attach_db(db_url: str, instance_class: str):
+    response = db_attach(db_url, instance_class)
+    return {"message": "Database instance is being attached", "response": response}
+
+def slackPost(*args):
+    today = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    webhook_url = 'https://hooks.slack.com/services/XXXX/XXXX/xyyyybbbbssssrm01' 
+    slack_data = {"channel": "@skondla", "username": args[4], 'text': today + ": " + args[3] + " Database: " + \
+            args[0] + " is " + args[2] + \
+            " for dB Endpoint: "  + args[1], "icon_emoji": ":man-biking:"}
+    region = 'us-east-1'
+  
+    response = requests.post(
+    webhook_url, data=json.dumps(slack_data),
+    headers={'Content-Type': 'application/json'}
+    )
+    if response.status_code != 200:
+       raise ValueError(
+        'Request to slack returned an error %s, the response is:\n%s'
+        % (response.status_code, response.text)
+       )    
+
+def sendEmail(*args):
+        with open('/app/email_distro', 'r') as f:
+	        email_distro = f.read()
+        os.system("echo dB: " + args[0] + " is " + args[2] + \
+                 " for dB: "  + args[1] + "|mailx -s 'dB Restore'" + email_distro)
+        
+##
+
 @auth_router.get("/status", response_class=HTMLResponse)
 def status_page():
     return "Render status.html"
@@ -109,3 +159,41 @@ def status_post(snapshot_name: str = Form(...), endpoint: str = Form(...)):
     except ClientError as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
     return JSONResponse(content={"snapshot_name": snapshot_name, "status": db_state})
+
+def get_ip(request: Request) -> str:
+    """Extracts the client IP address from request headers."""
+    if forwarded_for := request.headers.get("X-Forwarded-For"):
+        return forwarded_for.split(",")[0]  # Get the first IP in the list
+    return request.client.host if request.client else "Unknown"
+
+def log_user_info(email: str, request_type: str, endpoint: str, comments: str, request: Request, db: Session):
+    """Logs user activity into the database."""
+    today = datetime.datetime.now().strftime("%Y%m%d%H%M")
+    user_ip = get_ip(request)
+
+    logged_user = Userinfo(
+        email=email,
+        ip=user_ip,
+        time=today,
+        requesttype=request_type,
+        endpoint=endpoint,
+        comments=comments,
+    )
+
+    db.add(logged_user)
+    db.commit()
+    db.refresh(logged_user)
+    return logged_user
+
+@auth_router.post("/log-user-info/")
+async def log_user_info_api(
+    email: str, 
+    request_type: str, 
+    endpoint: str, 
+    comments: str, 
+    request: Request, 
+    db: Session = Depends(get_db)
+):
+    """API endpoint to log user activity."""
+    log_entry = log_user_info(email, request_type, endpoint, comments, request, db)
+    return {"message": "User info logged successfully", "log": log_entry}
