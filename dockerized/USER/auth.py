@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from fastapi_login import LoginManager
 from .models import User, Userinfo, get_db
-from .rdsAdmin import RDSDescribe, RDSCreate, RDSDelete, RDSRestore
+from lib.rdsAdmin import RDSDescribe, RDSCreate, RDSDelete, RDSRestore
 import json
 import requests
 import datetime
@@ -25,7 +25,7 @@ auth_router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Authentication Manager
-SECRET = "your-secret-key"
+SECRET = "v4vuTGsULjKyD3RMXnqKK8UFCQBy8m0A2JzbSHPFT0wT"
 manager = LoginManager(SECRET, token_url="/auth/token")
 
 @manager.user_loader
