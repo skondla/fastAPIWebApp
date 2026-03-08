@@ -4,31 +4,37 @@
 # -*- coding: utf-8 -*-
 # main.py
 
-from fastapi import FastAPI, Depends, Request
-from fastapi.templating import Jinja2Templates
-from starlette.responses import HTMLResponse
+from flask import Blueprint, render_template
+from flask_login import login_required, current_user
 
-app = FastAPI()
+main = Blueprint('main', __name__)
 
-# Setup Jinja2 template rendering
-templates = Jinja2Templates(directory="templates")
+@main.route('/')
+def index():
+    return render_template('index.html')
 
-# Dependency to get the current user (Mock for now)
-def get_current_user():
-    return {"name": "Test User"}  # Replace with actual authentication logic
+#@main.route('/restoreDB')
+#@login_required
+#def restore():
+#    return render_template('restoreDB.html', name=current_user.name)
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+@main.route('/restore')
+@login_required
+def restore():
+    return render_template('restore.html', name=current_user.name)
+    #return render_template('restore.html', name=current_user.name,ip=request.remote_addr)
 
-@app.get("/restore", response_class=HTMLResponse)
-async def restore(request: Request, user: dict = Depends(get_current_user)):
-    return templates.TemplateResponse("restore.html", {"request": request, "name": user["name"]})
+@main.route('/status')
+@login_required
+def status():
+    return render_template('status.html', name=current_user.name)
 
-@app.get("/status", response_class=HTMLResponse)
-async def status(request: Request, user: dict = Depends(get_current_user)):
-    return templates.TemplateResponse("status.html", {"request": request, "name": user["name"]})
+@main.route('/attachdb')
+@login_required
+def attachdb():
+    return render_template('attachdb.html', name=current_user.name)
 
-@app.get("/attachdb", response_class=HTMLResponse)
-async def attachdb(request: Request, user: dict = Depends(get_current_user)):
-    return templates.TemplateResponse("attachdb.html", {"request": request, "name": user["name"]})
+#@main.route('/profile')
+#@login_required
+#def profile():
+#    return render_template('profile.html', name=current_user.name)

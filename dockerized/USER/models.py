@@ -4,28 +4,20 @@
 # -*- coding: utf-8 -*-
 # models.py
 
-
+from flask_login import UserMixin
 from . import db
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
 
-Base = declarative_base()
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True) # primary keys are required by SQLAlchemy
+    email = db.Column(db.String(100), unique=True)
+    password = db.Column(db.String(1000))
+    name = db.Column(db.String(1000))
 
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(100), unique=True, nullable=False)
-    password = Column(String(1000), nullable=False)
-    name = Column(String(1000), nullable=False)
-
-class Userinfo(Base):
-    __tablename__ = "user_info"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String(100), unique=True, nullable=False)
-    ip = Column(String(50), nullable=False)
-    time = Column(String(60), nullable=False)
-    requesttype = Column(String(30))
-    endpoint = Column(String(100))
-    comments = Column(String(200))
+class Userinfo(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True) # primary keys are required by SQLAlchemy
+    email = db.Column(db.String(100), unique=True)
+    ip = db.Column(db.String(50))
+    time = db.Column(db.String(60))
+    requesttype = db.Column(db.String(30))
+    endpoint = db.Column(db.String(100))
+    comments = db.Column(db.String(200))

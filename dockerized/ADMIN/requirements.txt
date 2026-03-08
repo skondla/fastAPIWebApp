@@ -13,4 +13,3 @@ requests
 botocore
 boto
 pytest==7.3.2
-sqlalchemy.ext.asyncio

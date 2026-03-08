@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-config
+  namespace: ${GKE_NAMESPACE}
+data:
+  APP_PORT: "${APP_PORT}"
+  LOG_LEVEL: "info"
+  SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL}"
