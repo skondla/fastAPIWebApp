@@ -4,46 +4,50 @@
 # -*- coding: utf-8 -*-
 # init.py
 
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager 
+#import utils, os
 import os
-from fastapi import FastAPI, Depends
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
-from .database import Base, get_db
-from .models import User, Userinfo
-from .auth import router as auth_router
-from .main import router as main_router
 
-# Load environment variables from .env file
-load_dotenv()
+# init SQLAlchemy so we can use it later in our models
+db = SQLAlchemy()
 
-# Database Configuration
-DATABASE_URL = f"postgresql://{os.getenv('suser')}:{os.getenv('spassword')}@" \
-               f"{os.getenv('shost')}:{os.getenv('sport')}/{os.getenv('sdatabase')}"
+def create_app():
+    app = Flask(__name__)
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    app.config['SECRET_KEY'] = 's3dgMHEPR47DlmXNmb9hvHfj99U53beO'
+    #pgpassword = utils.getPassword(os.environ['spassword'],os.environ['region'])
+    #app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://' + os.environ['suser'] + ':' + pgpassword + '@' + os.environ['shost'] + '/' + os.environ['sdatabase']     
+	
+    #pgpassword = utils.getPassword(os.environ['spassword'],os.environ['region'])
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://' + os.environ['suser'] + ':' + os.environ['spassword'] \
+                                            + '@' + os.environ['shost'] + ':' + os.environ['sport'] + '/' + os.environ['sdatabase']
+    db.init_app(app)
 
-# Create the FastAPI App
-app = FastAPI(title="FastAPI App", version="1.0")
+    login_manager = LoginManager()
+    login_manager.login_view = 'auth.login'
+    login_manager.init_app(app)
 
-# Dependency for database sessions
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    from .models import User
+    from .models import Userinfo
 
-# Database Initialization
-Base.metadata.create_all(bind=engine)
+    @login_manager.user_loader
+    def load_user(user_id):
+        # since the user_id is just the primary key of our user table, use it in the query for the user
+        return User.query.get(int(user_id))
 
-# Register Routers
-app.include_router(auth_router, prefix="/auth")
-app.include_router(main_router, prefix="/main")
+    @login_manager.user_loader
+    def load_loginUserInfo(user_id):
+        # since the user_id is just the primary key of our user table, use it in the query for the user
+        return Userinfo.query.get(int(user_id))
 
-# Root Endpoint
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the FastAPI Application"}
+    # blueprint for auth routes in our app
+    from .auth import auth as auth_blueprint
+    app.register_blueprint(auth_blueprint)
 
+    # blueprint for non-auth parts of app
+    from .main import main as main_blueprint
+    app.register_blueprint(main_blueprint)
+
+    return app
