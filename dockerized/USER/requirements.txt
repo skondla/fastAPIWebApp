@@ -11,4 +11,4 @@ simplejson
 requests
 botocore
 boto
-pytest==7.3.2
+pytest==9.0.3
