@@ -49,18 +49,18 @@ function SignupPage() {
       <div className="w-full max-w-md animate-fade-in">
 
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-3xl mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-3xl mb-4">
             📋
           </div>
-          <h1 className="text-3xl font-bold text-white">Create Account</h1>
-          <p className="text-slate-400 mt-2 text-sm">Sign up to access the DB Restore Tool</p>
+          <h1 className="text-3xl font-bold text-white">Create Admin Account</h1>
+          <p className="text-slate-400 mt-2 text-sm">Admin portal access</p>
         </div>
 
         <div className="glass border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
           {error && (
             <div className="mb-5 p-4 rounded-xl bg-red-900/30 border border-red-700/40 text-red-300 text-sm flex items-start gap-2 animate-fade-in">
               <span className="mt-0.5">✗</span>
-              <span>{error}{' '}<a href="/login" className="underline hover:text-red-200">Go to login page</a>.</span>
+              <span>{error}{' '}<a href="/login" className="underline hover:text-red-200">Go to login</a>.</span>
             </div>
           )}
 
@@ -70,8 +70,8 @@ function SignupPage() {
               <input
                 type="email" name="email" autoFocus required
                 value={email} onChange={e => { setEmail(e.target.value); setError(''); }}
-                placeholder="your@email.com"
-                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 transition-all text-sm"
+                placeholder="admin@example.com"
+                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/70 transition-all text-sm"
               />
             </div>
 
@@ -81,7 +81,7 @@ function SignupPage() {
                 type="text" name="name" required
                 value={name} onChange={e => setName(e.target.value)}
                 placeholder="Jane Smith"
-                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 transition-all text-sm"
+                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/70 transition-all text-sm"
               />
             </div>
 
@@ -91,7 +91,7 @@ function SignupPage() {
                 type="password" name="password" required minLength="8"
                 value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 transition-all text-sm"
+                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/70 transition-all text-sm"
               />
               {strength && (
                 <div className="mt-2">
@@ -105,7 +105,7 @@ function SignupPage() {
             </div>
 
             <button type="submit" disabled={loading}
-              className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/40"
+              className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/40"
             >
               {loading ? (
                 <>
@@ -122,7 +122,9 @@ function SignupPage() {
 
         <p className="text-center text-slate-500 mt-5 text-sm">
           Already have an account?{' '}
-          <a href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">Login</a>
+          <a href="/login" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            Login
+          </a>
         </p>
       </div>
     </div>

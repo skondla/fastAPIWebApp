@@ -18,11 +18,11 @@ werkzeug>=3.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
 
-# AWS SDK
+# AWS SDK (kept for lib/ parity with ADMIN Flask app)
 boto3>=1.34.0
 botocore>=1.34.0
 
-# HTTP client (Slack notifications)
+# HTTP client
 requests>=2.31.0
 simplejson>=3.19.0
 

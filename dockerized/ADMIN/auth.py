@@ -1,4 +1,11 @@
-# auth.py
+# auth.py  (Flask — legacy)
+# FastAPI equivalent: dockerized/ADMIN_FASTAPI/routers/auth.py
+# Conversion notes:
+#   - Blueprint → APIRouter; Flask-Login → JWT HttpOnly cookie (python-jose + passlib)
+#   - flash() → template context error/message variable
+#   - url_for() → plain static URL strings in templates
+#   - generate_password_hash(method='sha256') → passlib bcrypt (with werkzeug fallback)
+#   - login_user/logout_user → set/delete HttpOnly JWT cookies
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash
 from werkzeug.security import generate_password_hash, check_password_hash
