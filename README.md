@@ -10,6 +10,8 @@
 
 A multi-cloud, containerized web application and REST API for managing AWS RDS database operations — including restore from snapshot, status monitoring, and cluster attachment. Deployed on Kubernetes (EKS, GKE) with a full DevSecOps pipeline via GitHub Actions and ArgoCD GitOps.
 
+> **Flask → FastAPI Migration** — Both the USER and ADMIN applications have been fully converted from Flask to FastAPI (Python 3.11, Uvicorn, JWT OAuth 2.0, Pydantic v2, OWASP Top 10 middleware). The FastAPI versions live in `dockerized/USER_FASTAPI/` and `dockerized/ADMIN_FASTAPI/`. The original Flask source files in `dockerized/USER/` and `dockerized/ADMIN/` are retained as legacy reference.
+
 ---
 
 ## Table of Contents
@@ -53,14 +55,15 @@ Authentication is required for all database operations. User signup is restricte
                    │ HTTPS :50443 / :20443          │ HTTPS :30443 / :17344
                    ▼                                ▼
        ┌───────────────────────┐       ┌────────────────────────┐
-       │    USER Application   │       │   ADMIN Application    │
-       │  (FastAPI + Jinja2)   │       │  (FastAPI + Flask)     │
-       │  Python 3.9 / Uvicorn │       │  Python 3.9 / mod_wsgi │
+       │  USER_FASTAPI App     │       │  ADMIN_FASTAPI App     │
+       │  (FastAPI + Jinja2)   │       │  (FastAPI + Jinja2)    │
+       │  Python 3.11/Uvicorn  │       │  Python 3.11/Uvicorn   │
        │                       │       │                        │
        │  Routes:              │       │  Routes:               │
-       │  /login  /signup      │       │  /auth/login           │
-       │  /restore /status     │       │  /auth/signup          │
-       │  /attachdb /logout    │       │  /main/profile         │
+       │  /login  /signup      │       │  /login  /signup       │
+       │  /restore /status     │       │  /profile  /logout     │
+       │  /attachdb /logout    │       │  /auth/token /auth/me  │
+       │  /auth/token /auth/me │       │                        │
        └──────────┬────────────┘       └──────────┬─────────────┘
                   │                               │
                   └──────────────┬────────────────┘
@@ -127,31 +130,49 @@ GitHub Actions
 
 ## Technology Stack
 
-| Layer | ADMIN App | USER App |
+### FastAPI Applications (current)
+
+| Layer | ADMIN_FASTAPI | USER_FASTAPI |
 |---|---|---|
-| Language | Python 3.9 | Python 3.9 |
-| Web Framework | Flask + FastAPI | FastAPI |
-| ASGI/WSGI Server | mod_wsgi (httpd) | Uvicorn |
+| Language | Python 3.11 | Python 3.11 |
+| Web Framework | **FastAPI** | **FastAPI** |
+| ASGI Server | **Uvicorn** | **Uvicorn** |
 | Templating | Jinja2 | Jinja2 |
-| Authentication | Flask-Login / JWT | fastapi-login (JWT) |
-| Password Hashing | bcrypt (passlib) | bcrypt (passlib) |
-| ORM | SQLAlchemy (async) | SQLAlchemy |
+| Authentication | **JWT OAuth 2.0** (python-jose) | **JWT OAuth 2.0** (python-jose) |
+| Password Hashing | bcrypt (passlib) + werkzeug fallback | bcrypt (passlib) + werkzeug fallback |
+| Schema Validation | **Pydantic v2** | **Pydantic v2** |
+| ORM | SQLAlchemy 2.0 | SQLAlchemy 2.0 |
 | Database | PostgreSQL (psycopg2) | PostgreSQL (psycopg2) |
+| Security | OWASP Top 10 middleware, rate-limiting, security headers | OWASP Top 10 middleware, rate-limiting, security headers |
 | AWS SDK | boto3 / botocore | boto3 / botocore |
 | HTTP Client | requests | requests |
-| Testing | pytest 7.3.2 | pytest 7.3.2 |
+| Testing | pytest + httpx | pytest + httpx |
+| Port | 30443 (HTTPS) | 50443 (HTTPS) |
+
+### Flask Applications (legacy reference)
+
+| Layer | ADMIN (Flask) | USER (Flask) |
+|---|---|---|
+| Language | Python 3.9 | Python 3.9 |
+| Web Framework | Flask | Flask |
+| WSGI Server | mod_wsgi (httpd) | mod_wsgi |
+| Authentication | Flask-Login | Flask-Login |
+| Password Hashing | werkzeug pbkdf2:sha256 | werkzeug pbkdf2:sha256 |
+| ORM | Flask-SQLAlchemy | Flask-SQLAlchemy |
+
+### Infrastructure
 
 | Infrastructure | Technology |
 |---|---|
-| Containerization | Docker (Python 3.9.13 base) |
-| Orchestration | Kubernetes (EKS, GKE) |
+| Containerization | Docker (Python 3.11-slim) |
+| Orchestration | Kubernetes (EKS, GKE, AKS) |
 | IaC | Terraform (modular, AWS) |
 | CI/CD | GitHub Actions |
 | GitOps | ArgoCD |
 | Security Scanning | Trivy (CRITICAL severity) |
 | Observability | Prometheus + Grafana (K8s operators) |
 | Message Queue | RabbitMQ (K8s operator) |
-| Cloud Providers | AWS (primary), GCP (secondary) |
+| Cloud Providers | AWS (primary), GCP, Azure |
 | TLS | Self-signed certs (containers) / ACM (AWS ALB) |
 
 ---
@@ -161,30 +182,61 @@ GitHub Actions
 ```
 fastAPIWebApp/
 ├── dockerized/
-│   ├── ADMIN/                    # Admin web application
-│   │   ├── main.py               # FastAPI app, router includes, startup events
-│   │   ├── auth.py               # Auth routes: /auth/login, /auth/signup
-│   │   ├── models.py             # SQLAlchemy ORM: User, Userinfo
-│   │   ├── database.py           # Async SQLAlchemy engine & session
-│   │   ├── dependencies.py       # JWT auth dependency, password utils
-│   │   ├── lib/
-│   │   │   ├── rdsAdmin.py       # RDS operations (Describe, Create, Delete, Restore)
-│   │   │   └── sesAdmin.py       # SES email notifications
-│   │   ├── templates/            # Jinja2 HTML: login, signup, index, profile
-│   │   ├── Dockerfile            # Python 3.9.13, self-signed TLS, port 30443
-│   │   └── requirements.txt      # flask, fastapi, sqlalchemy, boto3, ...
+│   ├── ADMIN_FASTAPI/            # ✅ FastAPI Admin Portal (converted from ADMIN/)
+│   │   ├── main.py               # FastAPI app: middleware, router includes, exception handler
+│   │   ├── database.py           # SQLAlchemy 2.0 engine + session factory
+│   │   ├── models.py             # ORM: User, Users (SQLAlchemy DeclarativeBase)
+│   │   ├── schemas.py            # Pydantic v2: UserCreate, UserResponse, Token
+│   │   ├── security.py           # JWT OAuth 2.0: create/decode tokens, bcrypt, dependencies
+│   │   ├── security_middleware.py# OWASP Top 10: security headers, rate-limit, audit log
+│   │   ├── routers/
+│   │   │   ├── auth.py           # /login /signup /logout + /auth/token /auth/me /auth/register
+│   │   │   └── main_router.py    # / (index), /profile (protected)
+│   │   ├── templates/            # Jinja2 HTML: base, index, login, signup, profile
+│   │   ├── Dockerfile            # Python 3.11-slim, Uvicorn, self-signed TLS, port 30443
+│   │   ├── startup.sh            # Container entrypoint: sets env vars, starts Uvicorn
+│   │   └── requirements.txt      # fastapi, uvicorn, sqlalchemy, passlib, python-jose, ...
 │   │
-│   ├── USER/                     # User web application
-│   │   ├── main.py               # FastAPI app: /, /restore, /status, /attachdb
-│   │   ├── auth.py               # Auth + DB operation routes (JWT via fastapi-login)
-│   │   ├── models.py             # SQLAlchemy ORM: User, Userinfo
-│   │   ├── database.py           # Database session config
+│   ├── USER_FASTAPI/             # ✅ FastAPI User App (converted from USER/)
+│   │   ├── main.py               # FastAPI app: middleware, exception handler
+│   │   ├── database.py           # SQLAlchemy 2.0 engine + session factory
+│   │   ├── models.py             # ORM: User, Userinfo
+│   │   ├── schemas.py            # Pydantic v2: UserCreate, Token, RestoreRequest, ...
+│   │   ├── security.py           # JWT OAuth 2.0 + werkzeug pbkdf2 migration support
+│   │   ├── security_middleware.py# OWASP Top 10 middleware + SSRF endpoint validation
+│   │   ├── routers/
+│   │   │   ├── auth.py           # /login /signup /logout + OAuth2 API endpoints
+│   │   │   └── main_router.py    # / /restore /status /attachdb (RDS ops + audit log)
 │   │   ├── lib/
-│   │   │   ├── rdsAdmin.py       # RDS: RDSDescribe, RDSCreate, RDSDelete, RDSRestore
-│   │   │   └── sesAdmin.py       # SES email alerts
-│   │   ├── templates/            # Jinja2 HTML: login, signup, restore, status, attachdb
-│   │   ├── Dockerfile            # Python 3.9.13, self-signed TLS, port 50443
-│   │   └── requirements.txt      # fastapi, uvicorn, sqlalchemy, boto3, passlib, ...
+│   │   │   ├── rdsAdmin.py       # RDS: RDSDescribe, RDSCreate, RDSRestore, RDSDelete
+│   │   │   └── utils.py          # AWS Secrets Manager helper
+│   │   ├── templates/            # Jinja2 HTML: base, login, signup, restore, status, attachdb
+│   │   ├── docs/                 # API docs (api.md, architecture.drawio)
+│   │   ├── Dockerfile            # Python 3.11-slim, Uvicorn, self-signed TLS, port 50443
+│   │   ├── startup.sh            # Container entrypoint
+│   │   └── requirements.txt      # fastapi, uvicorn, sqlalchemy, passlib, boto3, ...
+│   │
+│   ├── ADMIN/                    # ⚠️  Flask Admin (legacy — see ADMIN_FASTAPI/ for FastAPI)
+│   │   ├── main.py               # Flask Blueprint: / /profile
+│   │   ├── auth.py               # Flask Blueprint: /login /signup /logout
+│   │   ├── models.py             # Flask-SQLAlchemy: User, Users
+│   │   ├── lib/
+│   │   │   ├── rdsAdmin.py       # RDS operations
+│   │   │   └── sesAdmin.py       # SES email
+│   │   ├── templates/            # Jinja2 HTML (Flask url_for — not compatible with FastAPI)
+│   │   ├── Dockerfile            # Python 3.9.13, mod_wsgi, port 30443
+│   │   └── requirements.txt      # flask, flask-login, flask-sqlalchemy, ...
+│   │
+│   ├── USER/                     # ⚠️  Flask User App (legacy — see USER_FASTAPI/ for FastAPI)
+│   │   ├── main.py               # Flask Blueprint: / /restore /status /attachdb
+│   │   ├── auth.py               # Flask Blueprint: auth + RDS operations
+│   │   ├── models.py             # Flask-SQLAlchemy: User, Userinfo
+│   │   ├── lib/
+│   │   │   ├── rdsAdmin.py       # RDS classes
+│   │   │   └── sesAdmin.py       # SES email
+│   │   ├── templates/            # Jinja2 HTML (Flask url_for)
+│   │   ├── Dockerfile            # Python 3.9.13, port 50443
+│   │   └── requirements.txt      # flask, flask-login, flask-sqlalchemy, ...
 │   │
 │   └── DB/
 │       └── schema/
@@ -237,32 +289,60 @@ fastAPIWebApp/
 
 ## API Endpoints
 
-### USER Application (port `50443` / `20443`)
+### USER_FASTAPI (port `50443`)
 
-| Method | Endpoint | Auth | Description |
+#### Web UI (HTML, cookie-based JWT)
+
+| Method | Endpoint | Auth Required | Description |
 |---|---|---|---|
 | `GET` | `/` | No | Landing page |
 | `GET` | `/login` | No | Login form |
-| `POST` | `/login` | No | Authenticate; returns JWT access token |
+| `POST` | `/login` | No | Authenticate; sets JWT HttpOnly cookie |
 | `GET` | `/signup` | No | Signup form |
-| `POST` | `/signup` | No | Create user account (bcrypt-hashed password) |
-| `GET` | `/logout` | Yes | Clear auth cookie, redirect to `/` |
+| `POST` | `/signup` | No | Create account (bcrypt-hashed password) |
+| `GET` | `/logout` | No | Clear auth cookies, redirect to `/login` |
 | `GET` | `/restore` | Yes | Restore DB form |
 | `POST` | `/restore` | Yes | Restore RDS instance or Aurora cluster from snapshot |
 | `GET` | `/status` | Yes | Status check form |
-| `POST` | `/status` | Yes | Poll RDS restore status |
+| `POST` | `/status` | Yes | Poll RDS restore / instance status |
 | `GET` | `/attachdb` | Yes | Attach DB form |
-| `POST` | `/attachdb` | Yes | Create and attach instance to existing Aurora cluster |
-| `POST` | `/log-user-info/` | Yes | Write audit log entry (email, IP, timestamp, endpoint) |
+| `POST` | `/attachdb` | Yes | Create and attach instance to Aurora cluster |
 
-### ADMIN Application (port `30443` / `17344`)
+#### OAuth2 / REST API (JSON, Bearer token)
 
-| Method | Endpoint | Auth | Description |
+| Method | Endpoint | Auth Required | Description |
 |---|---|---|---|
-| `GET/POST` | `/auth/login` | No | Admin login |
-| `GET/POST` | `/auth/signup` | No | Admin user registration |
-| `GET` | `/main/profile` | Yes | Authenticated user profile page |
-| `GET` | `/` | No | Root — welcome message |
+| `POST` | `/auth/token` | No | OAuth2 password flow — returns access + refresh tokens |
+| `POST` | `/auth/refresh` | No (refresh cookie) | Exchange refresh token for new access token |
+| `GET` | `/auth/me` | Yes | Return current user profile |
+| `POST` | `/auth/register` | No | Register new user (API, returns JSON) |
+| `GET` | `/api/docs` | No | Swagger UI |
+| `GET` | `/api/redoc` | No | ReDoc |
+
+### ADMIN_FASTAPI (port `30443`)
+
+#### Web UI (HTML, cookie-based JWT)
+
+| Method | Endpoint | Auth Required | Description |
+|---|---|---|---|
+| `GET` | `/` | No | Admin portal landing page |
+| `GET` | `/login` | No | Admin login form |
+| `POST` | `/login` | No | Authenticate; sets JWT HttpOnly cookie |
+| `GET` | `/signup` | No | Admin signup form |
+| `POST` | `/signup` | No | Create admin account |
+| `GET` | `/logout` | No | Clear auth cookies |
+| `GET` | `/profile` | Yes | Authenticated admin profile page |
+
+#### OAuth2 / REST API (JSON, Bearer token)
+
+| Method | Endpoint | Auth Required | Description |
+|---|---|---|---|
+| `POST` | `/auth/token` | No | OAuth2 password flow |
+| `POST` | `/auth/refresh` | No (refresh cookie) | Refresh access token |
+| `GET` | `/auth/me` | Yes | Return current admin profile |
+| `POST` | `/auth/register` | No | Register admin user (API, returns JSON) |
+| `GET` | `/api/docs` | No | Swagger UI |
+| `GET` | `/api/redoc` | No | ReDoc |
 
 ---
 

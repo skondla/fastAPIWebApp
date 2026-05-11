@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${APP_NAME}
+  namespace: ${GKE_NAMESPACE}
+  labels:
+    app: ${APP_NAME}
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: LoadBalancer
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - name: https
+      port: ${APP_PORT}
+      targetPort: 30443
+      protocol: TCP

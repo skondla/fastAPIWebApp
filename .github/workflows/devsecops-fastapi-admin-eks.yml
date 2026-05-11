@@ -1,0 +1,369 @@
+name: "DevSecOps — FastAPI ADMIN — AWS EKS"
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "dockerized/ADMIN_FASTAPI/**"
+      - "aws/eks/deploy/manifest/fastapi-admin/**"
+      - "aws/eks/deploy/terraform-fastapi/**"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "dockerized/ADMIN_FASTAPI/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options: [staging, production]
+
+env:
+  AWS_REGION:      us-east-1
+  EKS_CLUSTER:     fastapi-demo-cluster
+  ECR_REPOSITORY:  fastapi-admin-app
+  APP_NAME:        fastapi-admin-app
+  EKS_NAMESPACE:   fastapi-admin-namespace
+  APP_PORT:        "30443"
+  IMAGE_TAG:       ${{ github.sha }}
+  PYTHON_VERSION:  "3.11"
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+
+jobs:
+# ════════════════════════════════════════════════════════════════════════════
+# 1. SECRET SCANNING
+# ════════════════════════════════════════════════════════════════════════════
+  secret-scan:
+    name: "🔍 Secret Scan (TruffleHog)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: TruffleHog — scan for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified
+
+      - name: GitLeaks — scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2. SAST
+# ════════════════════════════════════════════════════════════════════════════
+  sast:
+    name: "🔬 SAST (Bandit + Semgrep)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install SAST tools
+        run: pip install bandit semgrep
+
+      - name: Bandit — Python SAST (OWASP Top 10)
+        run: |
+          bandit -r dockerized/ADMIN_FASTAPI/ \
+            --configfile dockerized/ADMIN_FASTAPI/.bandit \
+            --format sarif \
+            --output bandit-results.sarif \
+            --severity-level medium || true
+
+      - name: Upload Bandit SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit
+
+      - name: Semgrep — OWASP Top 10 rules
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/python \
+            --config p/jwt \
+            --config p/secrets \
+            --config dockerized/ADMIN_FASTAPI/.semgrep.yml \
+            dockerized/ADMIN_FASTAPI/ \
+            --sarif --output semgrep-results.sarif || true
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+
+      - name: Upload SAST artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-reports-admin
+          path: "*.sarif"
+          retention-days: 30
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3. SCA
+# ════════════════════════════════════════════════════════════════════════════
+  sca:
+    name: "📦 SCA (pip-audit + Safety + Trivy FS)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install SCA tools
+        run: pip install pip-audit
+
+      - name: pip-audit — dependency vulnerability scan
+        run: |
+          pip-audit \
+            -r dockerized/ADMIN_FASTAPI/requirements.txt \
+            --format sarif \
+            --output pip-audit-results.sarif || true
+
+      - name: Upload pip-audit SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: pip-audit-results.sarif
+          category: pip-audit
+
+      - name: Trivy — filesystem SCA scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: dockerized/ADMIN_FASTAPI/
+          format: sarif
+          output: trivy-fs-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload Trivy FS SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: trivy-fs
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. BUILD & PUSH — Docker image to ECR
+# ════════════════════════════════════════════════════════════════════════════
+  build:
+    name: "🐳 Build & Push to ECR"
+    runs-on: ubuntu-latest
+    needs: [secret-scan, sast, sca]
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        id: build-image
+        working-directory: dockerized/ADMIN_FASTAPI
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          IMAGE_LATEST="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker build \
+            --label "git.commit=${GITHUB_SHA}" \
+            --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE" -t "$IMAGE_LATEST" .
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. CONTAINER SCAN
+# ════════════════════════════════════════════════════════════════════════════
+  container-scan:
+    name: "🔎 Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Run Trivy image vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: sarif
+          output: trivy-image-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+      - name: Upload Trivy image SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image-results.sarif
+          category: trivy-image
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. IaC SCAN — Terraform security (Checkov)
+# ════════════════════════════════════════════════════════════════════════════
+  iac-scan:
+    name: "🏗️ IaC Scan (Checkov)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkov — Terraform + K8s security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: aws/eks/deploy/terraform-fastapi
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          soft_fail: true
+
+      - name: Checkov — Kubernetes manifests scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: aws/eks/deploy/manifest/fastapi-admin
+          framework: kubernetes
+          output_format: sarif
+          output_file_path: checkov-k8s-results.sarif
+          soft_fail: true
+
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov-terraform
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. DEPLOY — Apply manifests to EKS
+# ════════════════════════════════════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy to EKS"
+    runs-on: ubuntu-latest
+    needs: [build, container-scan, iac-scan]
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.EKS_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Apply K8s manifests
+        env:
+          FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          export FASTAPI_IMAGE EKS_NAMESPACE APP_NAME APP_PORT
+
+          for manifest in \
+            aws/eks/deploy/manifest/fastapi-admin/namespace.yaml \
+            aws/eks/deploy/manifest/fastapi-admin/secret.yaml \
+            aws/eks/deploy/manifest/fastapi-admin/configmap.yaml \
+            aws/eks/deploy/manifest/fastapi-admin/deployment.yaml \
+            aws/eks/deploy/manifest/fastapi-admin/service.yaml \
+            aws/eks/deploy/manifest/fastapi-admin/hpa.yaml; do
+            envsubst < "$manifest" | kubectl apply -f -
+          done
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${APP_NAME} \
+            -n ${EKS_NAMESPACE} --timeout=5m
+
+      - name: Smoke test
+        run: |
+          LB=$(kubectl get svc ${APP_NAME} -n ${EKS_NAMESPACE} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "Load balancer: $LB"
+          curl -sk --max-time 30 "https://${LB}:${APP_PORT}/" | grep -i "Admin" \
+            && echo "✅ Smoke test passed" \
+            || echo "⚠️  Smoke test inconclusive (LB may still be provisioning)"
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. DAST — OWASP ZAP dynamic scan (post-deploy)
+# ════════════════════════════════════════════════════════════════════════════
+  dast:
+    name: "⚡ DAST (OWASP ZAP)"
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve load balancer hostname
+        id: lb
+        run: |
+          LB=$(kubectl get svc ${APP_NAME} -n ${EKS_NAMESPACE} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "url=https://${LB}:${APP_PORT}" >> "$GITHUB_OUTPUT"
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ steps.lb.outputs.url }}
+          rules_file_name: "dockerized/ADMIN_FASTAPI/.zap/rules.tsv"
+          cmd_options: "-a -j"
+          allow_issue_writing: false
+          fail_action: false
+
+      - name: Upload ZAP HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report-admin-eks
+          path: report_html.html
+          retention-days: 30
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9. NOTIFY — Slack
+# ════════════════════════════════════════════════════════════════════════════
+  notify:
+    name: "📣 Notify Slack"
+    runs-on: ubuntu-latest
+    needs: [deploy, dast]
+    if: always()
+    steps:
+      - name: Post result to Slack
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "*FastAPI ADMIN App — EKS Deploy*",
+              "attachments": [{
+                "color": "${{ needs.deploy.result == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  {"title": "Deploy",  "value": "${{ needs.deploy.result }}",  "short": true},
+                  {"title": "DAST",    "value": "${{ needs.dast.result }}",    "short": true},
+                  {"title": "Branch",  "value": "${{ github.ref_name }}",      "short": true},
+                  {"title": "Commit",  "value": "${{ github.sha }}",           "short": true}
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

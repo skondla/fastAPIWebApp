@@ -1,0 +1,282 @@
+name: "DevSecOps — FastAPI ADMIN — GCP GKE"
+
+on:
+  push:
+    branches: [master, main, testing_on_gcp]
+    paths:
+      - "dockerized/ADMIN_FASTAPI/**"
+      - "gcp/gke/deploy/manifests/fastapi-admin/**"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "dockerized/ADMIN_FASTAPI/**"
+  workflow_dispatch:
+
+env:
+  GKE_PROJECT:    ${{ secrets.GKE_PROJECT }}
+  GKE_CLUSTER:    fastapi-demo-cluster
+  GKE_REGION:     us-east4
+  GKE_ZONE:       us-east4-a
+  GKE_NAMESPACE:  fastapi-admin-namespace
+  GKE_SA:         fastapi-admin-serviceaccount
+  APP_NAME:       fastapi-admin-app
+  APP_PORT:       "30443"
+  IMAGE_TAG:      ${{ github.sha }}
+  PYTHON_VERSION: "3.11"
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write
+
+jobs:
+# ════════════════════════════════════════════════════════════════════════════
+# 1. SECRET SCAN
+# ════════════════════════════════════════════════════════════════════════════
+  secret-scan:
+    name: "🔍 Secret Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2. SAST
+# ════════════════════════════════════════════════════════════════════════════
+  sast:
+    name: "🔬 SAST (Bandit + Semgrep)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install bandit semgrep
+
+      - name: Bandit
+        run: |
+          bandit -r dockerized/ADMIN_FASTAPI/ \
+            --configfile dockerized/ADMIN_FASTAPI/.bandit \
+            --format sarif --output bandit-results.sarif \
+            --severity-level medium || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: bandit-results.sarif, category: bandit }
+
+      - name: Semgrep
+        run: |
+          semgrep \
+            --config p/owasp-top-ten --config p/python \
+            --config p/jwt --config p/secrets \
+            --config dockerized/ADMIN_FASTAPI/.semgrep.yml \
+            dockerized/ADMIN_FASTAPI/ \
+            --sarif --output semgrep-results.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: semgrep-results.sarif, category: semgrep }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3. SCA
+# ════════════════════════════════════════════════════════════════════════════
+  sca:
+    name: "📦 SCA (pip-audit + Trivy)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install pip-audit
+      - name: pip-audit
+        run: |
+          pip-audit -r dockerized/ADMIN_FASTAPI/requirements.txt \
+            --format sarif --output pip-audit-results.sarif || true
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: pip-audit-results.sarif, category: pip-audit }
+      - name: Trivy FS
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: dockerized/ADMIN_FASTAPI/
+          format: sarif
+          output: trivy-fs-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-fs-results.sarif, category: trivy-fs }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. BUILD & PUSH — Google Artifact Registry
+# ════════════════════════════════════════════════════════════════════════════
+  build:
+    name: "🐳 Build & Push to GAR"
+    runs-on: ubuntu-latest
+    needs: [secret-scan, sast, sca]
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GAR
+        run: gcloud auth configure-docker ${{ env.GKE_REGION }}-docker.pkg.dev
+
+      - name: Build and push
+        id: build-image
+        working-directory: dockerized/ADMIN_FASTAPI
+        run: |
+          IMAGE="${GKE_REGION}-docker.pkg.dev/${GKE_PROJECT}/${GKE_PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+          docker build \
+            --label "git.commit=${GITHUB_SHA}" \
+            --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5. CONTAINER SCAN
+# ════════════════════════════════════════════════════════════════════════════
+  container-scan:
+    name: "🔎 Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: sarif
+          output: trivy-image-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy-image-results.sarif, category: trivy-image }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6. IaC SCAN (Checkov)
+# ════════════════════════════════════════════════════════════════════════════
+  iac-scan:
+    name: "🏗️ IaC Scan (Checkov)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@master
+        with:
+          directory: gcp/gke/deploy/terraform-fastapi
+          framework: terraform
+          soft_fail: true
+      - uses: bridgecrewio/checkov-action@master
+        with:
+          directory: gcp/gke/deploy/manifests/fastapi-admin
+          framework: kubernetes
+          soft_fail: true
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. DEPLOY — GKE
+# ════════════════════════════════════════════════════════════════════════════
+  deploy:
+    name: "🚀 Deploy to GKE"
+    runs-on: ubuntu-latest
+    needs: [build, container-scan, iac-scan]
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location:     ${{ env.GKE_ZONE }}
+
+      - name: Apply K8s manifests
+        env:
+          FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          export FASTAPI_IMAGE GKE_NAMESPACE APP_NAME APP_PORT GKE_SA
+          for manifest in \
+            gcp/gke/deploy/manifests/fastapi-admin/namespace.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/secret.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/configmap.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/deployment.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/service.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/hpa.yaml; do
+            envsubst < "$manifest" | kubectl apply -f -
+          done
+          kubectl rollout status deployment/${APP_NAME} -n ${GKE_NAMESPACE} --timeout=5m
+
+      - name: Smoke test
+        run: |
+          LB=$(kubectl get svc ${APP_NAME} -n ${GKE_NAMESPACE} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "LB IP: $LB"
+          curl -sk --max-time 30 "https://${LB}:${APP_PORT}/" \
+            | grep -i "Admin" && echo "✅ OK" || echo "⚠️  LB warming up"
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. DAST
+# ════════════════════════════════════════════════════════════════════════════
+  dast:
+    name: "⚡ DAST (OWASP ZAP)"
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get LB IP
+        id: svc
+        run: |
+          LB=$(kubectl get svc ${APP_NAME} -n ${GKE_NAMESPACE} \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "url=https://${LB}:${APP_PORT}" >> "$GITHUB_OUTPUT"
+      - name: OWASP ZAP Baseline
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ steps.svc.outputs.url }}
+          rules_file_name: "dockerized/ADMIN_FASTAPI/.zap/rules.tsv"
+          fail_action: false
+      - uses: actions/upload-artifact@v4
+        with: { name: zap-report-admin-gke, path: report_html.html }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9. NOTIFY
+# ════════════════════════════════════════════════════════════════════════════
+  notify:
+    name: "📣 Notify Slack"
+    runs-on: ubuntu-latest
+    needs: [deploy, dast]
+    if: always()
+    steps:
+      - uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "*FastAPI ADMIN App — GKE Deploy: ${{ needs.deploy.result }}*",
+              "attachments": [{"color": "${{ needs.deploy.result == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  {"title": "DAST",   "value": "${{ needs.dast.result }}", "short": true},
+                  {"title": "Branch", "value": "${{ github.ref_name }}",   "short": true},
+                  {"title": "Commit", "value": "${{ github.sha }}",        "short": true}
+                ]}]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

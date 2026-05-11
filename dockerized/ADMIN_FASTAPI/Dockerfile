@@ -1,10 +1,9 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim
 LABEL maintainer="Sudheer Kondla, skondla@me.com"
-LABEL description="FastAPI DB Restore Management Tool with JWT OAuth 2.0"
+LABEL description="FastAPI Admin Portal — converted from Flask (dockerized/ADMIN/)"
 
 # ── System setup ───────────────────────────────────────────────────────────────
 RUN apt-get update && \
-    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         openssl \
         curl \
@@ -34,16 +33,16 @@ RUN mkdir -p /app/certs && \
 RUN pip3 install --upgrade pip && \
     pip3 install --no-cache-dir -r requirements.txt
 
-# ── Place lib modules on PYTHONPATH ───────────────────────────────────────────
-RUN cp lib/*.py /usr/local/lib/python3.11/
-
 # ── Permissions ───────────────────────────────────────────────────────────────
 RUN chmod +x startup.sh && \
     chown -R app:app /app
 
 USER app
 
-EXPOSE 50443
+# ── Ports ─────────────────────────────────────────────────────────────────────
+# 30443 = HTTPS (matches original Flask ADMIN port)
+# 8000  = HTTP fallback
+EXPOSE 30443
 EXPOSE 8000
 
 ENTRYPOINT ["/bin/bash"]

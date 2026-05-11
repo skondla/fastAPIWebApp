@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Author: skondla@me.com
-# Purpose: FastAPI User App entry point — DB Restore Management Tool
-#          Converted from Flask (Blueprint factory pattern) to FastAPI with JWT OAuth 2.0.
+# Purpose: FastAPI Admin Portal — authentication and user profile management.
+#          Converted from Flask (dockerized/ADMIN/) to FastAPI with JWT OAuth 2.0.
 # -*- coding: utf-8 -*-
 
 from fastapi import FastAPI, Request
@@ -21,17 +21,16 @@ from security_middleware import (
     SecurityHeadersMiddleware,
 )
 
-# Create all tables on startup (idempotent — skips existing tables)
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="DB Restore Management Tool",
+    title="DB Restore Admin Portal",
     description=(
-        "FastAPI conversion of Flask DB restore app. "
-        "Authenticate via **POST /auth/token** (OAuth2) or the web login UI. "
-        "All protected routes require a valid JWT Bearer token.\n\n"
-        "**Security:** JWT OAuth 2.0 · bcrypt · OWASP Top 10 mitigations · "
-        "rate-limiting · security headers · audit logging."
+        "FastAPI conversion of the Flask Admin app (dockerized/ADMIN/). "
+        "Provides admin user registration and profile management. "
+        "Authenticate via **POST /auth/token** (OAuth2) or the web login UI.\n\n"
+        "**Security:** JWT OAuth 2.0 · bcrypt · OWASP Top 10 · rate-limiting · "
+        "security headers · audit logging."
     ),
     version="2.0.0",
     docs_url="/api/docs",
@@ -54,7 +53,7 @@ app.add_middleware(
 try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
 except RuntimeError:
-    pass  # static/ directory is optional
+    pass
 
 templates = Jinja2Templates(directory="templates")
 
@@ -63,8 +62,7 @@ templates = Jinja2Templates(directory="templates")
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code == 401:
         if "text/html" in request.headers.get("Accept", ""):
-            next_path = request.url.path
-            return RedirectResponse(url=f"/login?next={next_path}", status_code=302)
+            return RedirectResponse(url=f"/login?next={request.url.path}", status_code=302)
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
@@ -81,7 +79,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=50443,
+        port=30443,
         ssl_certfile=ssl_cert if use_ssl else None,
         ssl_keyfile=ssl_key if use_ssl else None,
         reload=False,

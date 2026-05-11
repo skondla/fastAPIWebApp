@@ -5,7 +5,7 @@
 const _CTX = {
   error:   {{ (error   or '') | tojson }},
   message: {{ (message or '') | tojson }},
-  next:    {{ (next    or '/restore') | tojson }},
+  next:    {{ (next    or '/profile') | tojson }},
 };
 </script>
 
@@ -37,22 +37,24 @@ function LoginPage() {
       <div className="w-full max-w-md animate-fade-in">
 
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-3xl mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-3xl mb-4">
             🔐
           </div>
-          <h1 className="text-3xl font-bold text-white">DB Restore — Login</h1>
+          <h1 className="text-3xl font-bold text-white">Admin Login</h1>
           <p className="text-slate-400 mt-2 text-sm">Secured with JWT OAuth 2.0</p>
         </div>
 
         <div className="glass border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
           {message && (
             <div className="mb-5 p-4 rounded-xl bg-emerald-900/30 border border-emerald-700/40 text-emerald-300 text-sm flex items-start gap-2 animate-fade-in">
-              <span className="mt-0.5">✓</span><span>{message}</span>
+              <span className="mt-0.5">✓</span>
+              <span>{message}</span>
             </div>
           )}
           {error && (
             <div className="mb-5 p-4 rounded-xl bg-red-900/30 border border-red-700/40 text-red-300 text-sm flex items-start gap-2 animate-fade-in">
-              <span className="mt-0.5">✗</span><span>{error}</span>
+              <span className="mt-0.5">✗</span>
+              <span>{error}</span>
             </div>
           )}
 
@@ -64,8 +66,8 @@ function LoginPage() {
               <input
                 type="email" name="email" autoFocus required
                 value={email} onChange={e => { setEmail(e.target.value); setError(''); }}
-                placeholder="your@email.com"
-                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-blue-500/40 transition-all text-sm"
+                placeholder="admin@example.com"
+                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/70 focus:border-indigo-500/40 transition-all text-sm"
               />
             </div>
 
@@ -75,7 +77,7 @@ function LoginPage() {
                 type="password" name="password" required
                 value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-blue-500/40 transition-all text-sm"
+                className="w-full px-4 py-3 rounded-xl bg-slate-700/40 border border-slate-600/60 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/70 focus:border-indigo-500/40 transition-all text-sm"
               />
             </div>
 
@@ -83,7 +85,7 @@ function LoginPage() {
               <input
                 type="checkbox" id="remember" name="remember" value="1"
                 checked={remember} onChange={e => setRemember(e.target.checked)}
-                className="w-4 h-4 rounded bg-slate-700 border-slate-600 accent-blue-500"
+                className="w-4 h-4 rounded bg-slate-700 border-slate-600 accent-indigo-500"
               />
               <label htmlFor="remember" className="text-sm text-slate-400 cursor-pointer">
                 Remember me for 7 days
@@ -91,7 +93,7 @@ function LoginPage() {
             </div>
 
             <button type="submit" disabled={loading}
-              className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/40"
+              className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/40"
             >
               {loading ? (
                 <>
@@ -101,14 +103,18 @@ function LoginPage() {
                   </svg>
                   Authenticating…
                 </>
-              ) : '🔐 Login & get JWT token'}
+              ) : (
+                <>🔐 Login &amp; get JWT token</>
+              )}
             </button>
           </form>
         </div>
 
         <p className="text-center text-slate-500 mt-5 text-sm">
           No account?{' '}
-          <a href="/signup" className="text-blue-400 hover:text-blue-300 font-medium transition-colors">Sign Up</a>
+          <a href="/signup" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            Sign Up
+          </a>
         </p>
         <p className="text-center text-slate-600 mt-2 text-xs">
           Developers:{' '}
