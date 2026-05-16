@@ -18,12 +18,27 @@ A multi-cloud, containerized web application and REST API for managing AWS RDS d
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+  - [High-Level System Architecture](#high-level-system-architecture)
+  - [Application Component Architecture](#application-component-architecture)
+  - [Deployment Topology — Multi-Cloud Kubernetes](#deployment-topology--multi-cloud-kubernetes)
 - [Technology Stack](#technology-stack)
 - [Application Structure](#application-structure)
 - [API Endpoints](#api-endpoints)
 - [Database Schema](#database-schema)
+- [Data Flow Diagrams](#data-flow-diagrams)
+  - [Authentication & JWT Issuance](#authentication--jwt-issuance)
+  - [RDS Restore Operation — End-to-End](#rds-restore-operation--end-to-end)
+  - [Request Pipeline & OWASP Middleware Chain](#request-pipeline--owasp-middleware-chain)
+- [Network Architecture](#network-architecture)
+  - [AWS VPC & EKS Network Topology](#aws-vpc--eks-network-topology)
+  - [Kubernetes Service Mesh & Pod Networking](#kubernetes-service-mesh--pod-networking)
+  - [Ingress & TLS Termination Flow](#ingress--tls-termination-flow)
 - [Infrastructure](#infrastructure)
 - [CI/CD Pipeline](#cicd-pipeline)
+  - [DevSecOps Pipeline — 9-Stage Flow](#devsecops-pipeline--9-stage-flow)
+  - [Pipeline Stage Dependency Graph](#pipeline-stage-dependency-graph)
+  - [GitOps Reconciliation Loop (ArgoCD)](#gitops-reconciliation-loop-argocd)
+  - [Security Scanning Coverage Matrix](#security-scanning-coverage-matrix)
 - [Getting Started](#getting-started)
 - [Usage — cURL Examples](#usage--curl-examples)
 - [Screenshots](#screenshots)
@@ -48,82 +63,195 @@ Authentication is required for all database operations. User signup is restricte
 
 ## Architecture
 
+### High-Level System Architecture
+
+A bird's-eye view of the full system — clients, the two FastAPI services, persistence, AWS managed services, the CI/CD plane, and the GitOps controller.
+
+```mermaid
+flowchart TB
+    classDef client fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#0D47A1
+    classDef app fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px,color:#1B5E20
+    classDef data fill:#FFF3E0,stroke:#E65100,stroke-width:2px,color:#BF360C
+    classDef aws fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#B71C1C
+    classDef cicd fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px,color:#4A148C
+    classDef k8s fill:#E0F7FA,stroke:#00838F,stroke-width:2px,color:#006064
+
+    subgraph Clients["👥 Clients"]
+        B[Browser<br/>HTML + Jinja2]
+        C[cURL / API Client<br/>JSON + Bearer Token]
+        S[Swagger UI<br/>/api/docs]
+    end
+
+    subgraph Edge["🌐 Edge — TLS Termination"]
+        LB[AWS NLB / ALB<br/>or Azure LB / GCP LB<br/>HTTPS]
+    end
+
+    subgraph K8s["☸️ Kubernetes (EKS / GKE / AKS)"]
+        subgraph UserNS["fastapi-namespace"]
+            U1[USER_FASTAPI Pod<br/>:50443<br/>x3 replicas]
+        end
+        subgraph AdminNS["fastapi-admin-namespace"]
+            A1[ADMIN_FASTAPI Pod<br/>:30443<br/>x3 replicas]
+        end
+        HPA[HPA<br/>min=2 max=10<br/>cpu=70% mem=80%]
+    end
+
+    subgraph DataLayer["💾 Data Layer"]
+        PG[(PostgreSQL<br/>users · user_info<br/>SQLAlchemy 2.0)]
+    end
+
+    subgraph AWSManaged["☁️ AWS Managed Services"]
+        RDS[(RDS / Aurora<br/>Restore · Status · Attach<br/>via boto3)]
+        SES[SES<br/>Email Alerts]
+        ECR[(ECR<br/>Container Registry)]
+        SM[Secrets Manager<br/>DB credentials]
+    end
+
+    subgraph Notify["📣 Notifications"]
+        SLACK[Slack Webhook]
+    end
+
+    subgraph Control["🛠️ Control Plane"]
+        GH[GitHub<br/>source of truth]
+        GHA[GitHub Actions<br/>DevSecOps Pipeline]
+        ARGO[ArgoCD<br/>GitOps reconciler]
+    end
+
+    B -->|HTTPS 50443/30443| LB
+    C -->|HTTPS Bearer| LB
+    S -->|HTTPS| LB
+    LB --> U1
+    LB --> A1
+    HPA -.scales.-> U1
+    HPA -.scales.-> A1
+
+    U1 -->|SQL TCP 5432| PG
+    A1 -->|SQL TCP 5432| PG
+    U1 -->|HTTPS API| RDS
+    U1 -->|SMTP| SES
+    U1 -->|Webhook| SLACK
+    U1 -.fetch creds.-> SM
+    A1 -.fetch creds.-> SM
+
+    GH -->|push| GHA
+    GHA -->|push image| ECR
+    GHA -->|kubectl apply| K8s
+    ECR -->|pull image| K8s
+    ARGO -->|reconcile| K8s
+    GH -->|manifests| ARGO
+
+    class B,C,S client
+    class U1,A1 app
+    class PG data
+    class RDS,SES,ECR,SM aws
+    class GH,GHA,ARGO cicd
+    class HPA,LB k8s
+    class SLACK cicd
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          Client (Browser / cURL)                         │
-└──────────────────┬───────────────────────────────┬───────────────────────┘
-                   │ HTTPS :50443 / :20443          │ HTTPS :30443 / :17344
-                   ▼                                ▼
-       ┌───────────────────────┐       ┌────────────────────────┐
-       │  USER_FASTAPI App     │       │  ADMIN_FASTAPI App     │
-       │  (FastAPI + Jinja2)   │       │  (FastAPI + Jinja2)    │
-       │  Python 3.11/Uvicorn  │       │  Python 3.11/Uvicorn   │
-       │                       │       │                        │
-       │  Routes:              │       │  Routes:               │
-       │  /login  /signup      │       │  /login  /signup       │
-       │  /restore /status     │       │  /profile  /logout     │
-       │  /attachdb /logout    │       │  /auth/token /auth/me  │
-       │  /auth/token /auth/me │       │                        │
-       └──────────┬────────────┘       └──────────┬─────────────┘
-                  │                               │
-                  └──────────────┬────────────────┘
-                                 │
-                  ┌──────────────▼────────────────┐
-                  │     PostgreSQL Database        │
-                  │  Tables: users, user_info      │
-                  │  (Docker container / RDS)      │
-                  └──────────────┬────────────────┘
-                                 │
-                  ┌──────────────▼────────────────┐
-                  │         AWS Services           │
-                  │  ┌─────────────────────────┐  │
-                  │  │  RDS / Aurora           │  │
-                  │  │  (Restore, Status,      │  │
-                  │  │   Attach via boto3)     │  │
-                  │  ├─────────────────────────┤  │
-                  │  │  SES (Email alerts)     │  │
-                  │  ├─────────────────────────┤  │
-                  │  │  ECR (Container images) │  │
-                  │  └─────────────────────────┘  │
-                  └───────────────────────────────┘
 
-─────────────────── Deployment Targets ─────────────────────
+### Application Component Architecture
 
-  ┌─────────────────────┐    ┌─────────────────────┐
-  │  AWS EKS / ECS      │    │  GCP GKE            │
-  │  (us-west-2)        │    │  (us-central1)      │
-  │  Terraform modules  │    │  K8s manifests      │
-  │  ALB, VPC, NAT GW   │    │  3-replica deploy   │
-  └─────────────────────┘    └─────────────────────┘
-            │                          │
-            └──────────┬───────────────┘
-                       │
-          ┌────────────▼───────────────┐
-          │  ArgoCD (GitOps)           │
-          │  GitHub Actions (CI/CD)    │
-          │  Trivy (Security scanning) │
-          └────────────────────────────┘
+Internal layering of each FastAPI service — middleware chain, routers, dependencies, and persistence.
+
+```mermaid
+flowchart LR
+    classDef mw fill:#FFF8E1,stroke:#F57F17,stroke-width:2px,color:#E65100
+    classDef route fill:#E8EAF6,stroke:#283593,stroke-width:2px,color:#1A237E
+    classDef sec fill:#FCE4EC,stroke:#AD1457,stroke-width:2px,color:#880E4F
+    classDef model fill:#E0F2F1,stroke:#00695C,stroke-width:2px,color:#004D40
+
+    REQ([HTTP Request]) --> MW1
+    subgraph MWChain["Middleware Chain  (LIFO — last added runs first)"]
+        direction LR
+        MW1[CORS<br/>Middleware]
+        MW2[RateLimit<br/>200/min · 10/min auth]
+        MW3[SecurityHeaders<br/>HSTS · CSP · X-Frame]
+        MW4[SecurityAudit<br/>structured log]
+        MW1 --> MW2 --> MW3 --> MW4
+    end
+
+    MW4 --> ROUTER
+
+    subgraph ROUTER["FastAPI Router Dispatch"]
+        direction TB
+        AUTH[auth.py<br/>/login /signup /logout<br/>/auth/token /auth/refresh<br/>/auth/me /auth/register]
+        MAIN[main_router.py<br/>/ /restore /status /attachdb<br/>/profile]
+    end
+
+    AUTH --> SEC
+    MAIN --> SEC
+
+    subgraph SEC["Security Layer (security.py)"]
+        direction TB
+        JWT[JWT OAuth 2.0<br/>HS256 · 30 min access<br/>7 day refresh]
+        BCRYPT[bcrypt + passlib<br/>+ werkzeug fallback]
+        DEPS[FastAPI Depends<br/>get_current_user<br/>get_optional_user]
+        SSRF[SSRF Guard<br/>validate_rds_endpoint]
+    end
+
+    SEC --> DAL
+
+    subgraph DAL["Data Access Layer"]
+        direction TB
+        SQLA[SQLAlchemy 2.0<br/>Session per-request]
+        MODELS[models.py<br/>User · Userinfo]
+        SCHEMAS[schemas.py<br/>Pydantic v2 DTOs]
+        SQLA --> MODELS
+        SQLA --> SCHEMAS
+    end
+
+    DAL --> PG[(PostgreSQL)]
+
+    MAIN -->|boto3| AWS_RDS[(AWS RDS / Aurora)]
+    MAIN -->|requests| SLACK([Slack])
+    MAIN -->|mailx| SES([AWS SES])
+
+    class MW1,MW2,MW3,MW4 mw
+    class AUTH,MAIN route
+    class JWT,BCRYPT,DEPS,SSRF sec
+    class SQLA,MODELS,SCHEMAS model
 ```
 
-### Component Interaction
+### Deployment Topology — Multi-Cloud Kubernetes
 
-```
-GitHub Push
-    │
-    ▼
-GitHub Actions
-    ├── Trivy Vulnerability Scan (SARIF → GitHub Security)
-    ├── Docker Build & Push → ECR / GCR
-    └── Deploy → EKS  or  GKE
-                    │
-                    ▼
-              ArgoCD (GitOps)
-                    │
-            ┌───────┴────────┐
-            ▼                ▼
-    K8s Deployment       K8s Service
-    (admin-ui x3)        (user-ui)
-    (user-ui  x3)        (admin-ui)
+The same container image deploys to AWS EKS, GCP GKE, and Azure AKS via cloud-specific Terraform + manifests.
+
+```mermaid
+flowchart TB
+    classDef aws fill:#FFEBEE,stroke:#C62828,color:#B71C1C
+    classDef gcp fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
+    classDef az  fill:#E8EAF6,stroke:#283593,color:#1A237E
+    classDef gh  fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
+
+    GH[("📦 GitHub Repo<br/>fastAPIWebApp")]:::gh
+
+    GH --> AWSP
+    GH --> GCPP
+    GH --> AZP
+
+    subgraph AWSP["☁️ AWS — us-east-1"]
+        ECR[(ECR<br/>fastapi-user-app<br/>fastapi-admin-app)]:::aws
+        EKS[EKS Cluster<br/>fastapi-demo-cluster<br/>private + public subnets<br/>2 AZ · NAT GW]:::aws
+        AWSRDS[(RDS / Aurora<br/>Multi-AZ)]:::aws
+        ECR --> EKS
+        EKS --> AWSRDS
+    end
+
+    subgraph GCPP["☁️ GCP — us-central1"]
+        GCR[(Artifact Registry)]:::gcp
+        GKE[GKE Cluster<br/>VPC-native · regional<br/>workload identity]:::gcp
+        CSQL[(Cloud SQL Postgres)]:::gcp
+        GCR --> GKE
+        GKE --> CSQL
+    end
+
+    subgraph AZP["☁️ Azure — eastus"]
+        ACR[(Azure ACR<br/>fastapiregistry)]:::az
+        AKS[AKS Cluster<br/>fastapi-aks-cluster<br/>VNet + system pool]:::az
+        AZDB[(Azure Database<br/>for PostgreSQL)]:::az
+        ACR --> AKS
+        AKS --> AZDB
+    end
 ```
 
 ---
@@ -373,6 +501,327 @@ CREATE TABLE user_info (
 
 ---
 
+## Data Flow Diagrams
+
+### Authentication & JWT Issuance
+
+OAuth 2.0 password-flow with bcrypt verification and HttpOnly cookie + Bearer header dual-mode auth. See [`security.py`](dockerized/USER_FASTAPI/security.py) and [`routers/auth.py`](dockerized/USER_FASTAPI/routers/auth.py).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Client (Browser / API)
+    participant LB as NLB :50443
+    participant MW as Middleware Chain<br/>(rate-limit · headers · audit)
+    participant Auth as auth.py<br/>POST /auth/token
+    participant Sec as security.py
+    participant DB as PostgreSQL<br/>users table
+
+    User->>LB: POST /auth/token (username, password)
+    LB->>MW: forward HTTPS
+    MW->>MW: rate-limit check (10/min for /auth)
+    MW->>Auth: dispatch
+    Auth->>DB: SELECT * FROM users WHERE email=?
+    DB-->>Auth: user row + hashed pw
+    Auth->>Sec: verify_password(plain, hashed)
+
+    alt bcrypt matches
+        Sec-->>Auth: True
+    else fallback to werkzeug pbkdf2
+        Sec->>Sec: check_password_hash(legacy)
+        Sec-->>Auth: True / False
+    end
+
+    alt valid
+        Auth->>Sec: create_access_token(sub=email, exp=30m)
+        Auth->>Sec: create_refresh_token(sub=email, exp=7d)
+        Sec-->>Auth: access_jwt, refresh_jwt
+        Auth-->>User: 200 {access_token, refresh_token}<br/>+ Set-Cookie: access_token (HttpOnly)
+    else invalid
+        Auth-->>User: 401 Unauthorized<br/>WWW-Authenticate: Bearer
+    end
+
+    Note over User,DB: Subsequent protected request
+    User->>LB: GET /restore<br/>Cookie: access_token=Bearer&lt;jwt&gt;
+    LB->>MW: forward
+    MW->>Sec: get_current_user (Depends)
+    Sec->>Sec: decode JWT (HS256, SECRET_KEY)
+    Sec->>DB: lookup user by sub claim
+    DB-->>Sec: user
+    Sec-->>MW: User object
+    MW-->>User: 200 (restore page)
+```
+
+### RDS Restore Operation — End-to-End
+
+Full data flow for `POST /restore` — from form submission through AWS RDS API call to multi-channel notification and audit logging.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Authenticated User
+    participant API as USER_FASTAPI<br/>POST /restore
+    participant SSRF as SSRF Validator<br/>validate_rds_endpoint
+    participant RDS as boto3 RDS Client
+    participant AWS as AWS RDS / Aurora
+    participant PG as PostgreSQL<br/>user_info (audit)
+    participant SLACK as Slack Webhook
+    participant SES as AWS SES
+
+    U->>API: POST /restore<br/>{snapshotname, endpoint}
+    API->>API: get_optional_user → require auth
+    API->>SSRF: validate_rds_endpoint(endpoint)
+
+    alt invalid hostname (private IP, non-RDS pattern)
+        SSRF-->>API: raise ValueError
+        API-->>U: 400 Bad Request
+    else valid AWS RDS hostname
+        SSRF-->>API: ok
+        API->>RDS: dbInstanceInfo(endpoint)
+        RDS->>AWS: DescribeDBInstances / DescribeDBClusters
+        AWS-->>RDS: SG, subnet, engine, version, class
+        RDS-->>API: instance metadata
+
+        alt endpoint is cluster
+            API->>RDS: restore_db_cluster_from_snapshot(...)
+            RDS->>AWS: RestoreDBClusterFromSnapshot
+        else endpoint is instance
+            API->>RDS: restore_db_instance_from_db_snapshot(...)
+            RDS->>AWS: RestoreDBInstanceFromDBSnapshot
+        end
+        AWS-->>RDS: DBClusterIdentifier / DBInstanceIdentifier
+        RDS-->>API: success
+
+        API->>RDS: getDBClusterStatus / getDBInstanceStatus
+        RDS->>AWS: DescribeDB*
+        AWS-->>RDS: state (creating / available / ...)
+        RDS-->>API: db_state
+
+        par audit log
+            API->>PG: INSERT INTO user_info<br/>(email, ip, time, requesttype='DB Restore', endpoint)
+            PG-->>API: ok
+        and Slack notification
+            API->>SLACK: POST {channel, text, icon_emoji}
+            SLACK-->>API: 200
+        and email alert
+            API->>SES: mailx -s 'dB Restore' &lt;distro&gt;
+            SES-->>API: queued
+        end
+
+        API-->>U: 202 Accepted<br/>"Database X is being restored.<br/>New Endpoint: ... Status: ..."
+    end
+```
+
+### Request Pipeline & OWASP Middleware Chain
+
+Every request traverses four middleware layers before reaching a route handler. Order is LIFO — last added runs first.
+
+```mermaid
+flowchart LR
+    classDef pass fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
+    classDef block fill:#FFEBEE,stroke:#C62828,color:#B71C1C
+    classDef route fill:#E8EAF6,stroke:#283593,color:#1A237E
+
+    REQ([HTTPS Request])
+    REQ --> AUDIT
+
+    AUDIT["1️⃣  SecurityAuditMiddleware<br/>start timer · capture IP"]:::pass
+    AUDIT --> HEADERS
+
+    HEADERS["2️⃣  SecurityHeadersMiddleware<br/>(applied to response)<br/>HSTS · CSP · X-Frame · nosniff"]:::pass
+    HEADERS --> RATE
+
+    RATE{"3️⃣  RateLimitMiddleware<br/>200/min general<br/>10/min auth endpoints"}
+    RATE -->|over limit| R429["429 Too Many Requests<br/>Retry-After: 60"]:::block
+    RATE -->|under limit| CORS
+
+    CORS["4️⃣  CORSMiddleware<br/>* / credentials / methods / headers"]:::pass
+    CORS --> ROUTE
+
+    ROUTE["FastAPI Router<br/>dependency injection<br/>(get_current_user · get_db)"]:::route
+    ROUTE -->|401| AUTH_REDIR["HTML req → 302 /login?next=&lt;path&gt;<br/>JSON req → 401 JSON"]:::block
+    ROUTE -->|200 / 2xx| RESP([Response])
+    ROUTE -->|400 / 500| ERR(["Error response"]):::block
+
+    RESP --> HEADERS
+    ERR --> HEADERS
+    AUTH_REDIR --> HEADERS
+
+    R429 --> AUDIT_OUT
+    HEADERS --> AUDIT_OUT["AUDIT log emitted<br/>(method · path · status · ip · duration_ms)"]:::pass
+    AUDIT_OUT --> OUT([HTTPS Response])
+```
+
+---
+
+## Network Architecture
+
+### AWS VPC & EKS Network Topology
+
+Defined in [`aws/eks/deploy/terraform/`](aws/eks/deploy/terraform/) — `192.168.0.0/16` VPC across two AZs with public/private subnet pairs.
+
+```mermaid
+flowchart TB
+    classDef public fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
+    classDef private fill:#FFF3E0,stroke:#E65100,color:#BF360C
+    classDef ctrl fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
+    classDef ext fill:#ECEFF1,stroke:#37474F,color:#263238
+
+    INET([🌍 Internet]):::ext
+    IGW[Internet Gateway]:::ctrl
+
+    INET <--> IGW
+
+    subgraph VPC["VPC  k8svpc  ·  192.168.0.0/16  ·  us-east-1"]
+        direction TB
+
+        subgraph AZA["Availability Zone us-east-1a"]
+            PUBA["public-us-east-1a<br/>192.168.64.0/19<br/>map_public_ip=true<br/>kubernetes.io/role/elb=1"]:::public
+            PRIA["private-us-east-1a<br/>192.168.0.0/19<br/>kubernetes.io/role/internal-elb=1"]:::private
+            NATA[NAT Gateway A]:::ctrl
+            NLBA[NLB Node A<br/>:50443 / :30443]:::public
+            NODEA[EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod]:::private
+        end
+
+        subgraph AZB["Availability Zone us-east-1b"]
+            PUBB["public-us-east-1b<br/>192.168.96.0/19<br/>map_public_ip=true"]:::public
+            PRIB["private-us-east-1b<br/>192.168.32.0/19"]:::private
+            NATB[NAT Gateway B]:::ctrl
+            NLBB[NLB Node B]:::public
+            NODEB[EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod]:::private
+        end
+
+        EKSCTL["EKS Control Plane<br/>(AWS-managed)<br/>OIDC provider"]:::ctrl
+    end
+
+    RDS[(Amazon RDS / Aurora<br/>Multi-AZ<br/>private subnets)]:::private
+    ECR[(Amazon ECR)]:::ext
+    SES[Amazon SES]:::ext
+    SLACK[Slack Webhook]:::ext
+
+    IGW --> PUBA
+    IGW --> PUBB
+    PUBA --- NLBA
+    PUBB --- NLBB
+    PUBA --- NATA
+    PUBB --- NATB
+
+    NLBA -->|TCP 50443/30443| NODEA
+    NLBB -->|TCP 50443/30443| NODEB
+
+    NODEA --- PRIA
+    NODEB --- PRIB
+
+    PRIA -->|egress via| NATA
+    PRIB -->|egress via| NATB
+    NATA --> IGW
+    NATB --> IGW
+
+    NODEA -->|TCP 5432| RDS
+    NODEB -->|TCP 5432| RDS
+    NODEA -->|HTTPS API| ECR
+    NODEA -->|SMTP| SES
+    NODEA -->|HTTPS| SLACK
+
+    EKSCTL -.manages.- NODEA
+    EKSCTL -.manages.- NODEB
+```
+
+### Kubernetes Service Mesh & Pod Networking
+
+Per-namespace topology with HPA, NLB, init container DB wait, and pod-level security context. From [`aws/eks/deploy/manifest/fastapi1/`](aws/eks/deploy/manifest/fastapi1/).
+
+```mermaid
+flowchart TB
+    classDef svc fill:#E0F7FA,stroke:#00838F,color:#006064
+    classDef pod fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
+    classDef cfg fill:#FFF8E1,stroke:#F57F17,color:#E65100
+    classDef hpa fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
+
+    EXT([External Client<br/>HTTPS])
+    EXT --> NLB
+
+    subgraph NS["Namespace: fastapi-namespace"]
+        NLB["Service: fastapi-user-app<br/>type=LoadBalancer (NLB)<br/>port 50443 → targetPort 50443<br/>backend-protocol=tcp"]:::svc
+
+        subgraph DEP["Deployment: fastapi-user-app  (replicas=3 · RollingUpdate maxSurge=1, maxUnavail=0)"]
+            direction LR
+            P1[Pod #1<br/>uvicorn :50443<br/>nonRoot · seccomp]:::pod
+            P2[Pod #2<br/>uvicorn :50443]:::pod
+            P3[Pod #3<br/>uvicorn :50443]:::pod
+        end
+
+        INIT["initContainer: wait-for-db<br/>busybox · nc -z $shost $sport<br/>readOnlyRootFs · cap drop ALL"]:::pod
+
+        HPA["HorizontalPodAutoscaler<br/>min=2 max=10<br/>cpu 70% · mem 80%"]:::hpa
+
+        SECRET["Secret: fastapi-db-secret<br/>DB_HOST · DB_USER · DB_PASSWORD<br/>JWT_SECRET_KEY · AWS creds"]:::cfg
+        CM["ConfigMap: fastapi-config<br/>APP_NAME · APP_PORT<br/>AWS_REGION · LOG_LEVEL"]:::cfg
+
+        SA["ServiceAccount: fastapi-sa<br/>IRSA → IAM role (RDS, SES)<br/>automountToken=false"]:::cfg
+
+        SPREAD["topologySpreadConstraints<br/>maxSkew=1 · hostname<br/>DoNotSchedule"]:::hpa
+
+        TSC["Probes:<br/>startup 5s/12fail<br/>readiness 10s<br/>liveness 30s"]:::hpa
+    end
+
+    PG[(PostgreSQL<br/>:5432)]
+    RDS[(AWS RDS API<br/>boto3)]
+
+    NLB --> P1
+    NLB --> P2
+    NLB --> P3
+
+    INIT --> P1
+    INIT --> P2
+    INIT --> P3
+
+    SECRET -.envFrom.-> P1
+    CM -.envFrom.-> P1
+    SA -.identity.-> P1
+
+    HPA -.scales.-> DEP
+    SPREAD -.spreads.-> DEP
+    TSC -.checks.-> DEP
+
+    P1 -->|5432| PG
+    P2 -->|5432| PG
+    P3 -->|5432| PG
+    P1 -->|IRSA HTTPS| RDS
+```
+
+### Ingress & TLS Termination Flow
+
+End-to-end TLS path showing where each hop terminates / re-encrypts.
+
+```mermaid
+flowchart LR
+    classDef edge fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
+    classDef enc fill:#FFEBEE,stroke:#C62828,color:#B71C1C
+    classDef plain fill:#FFF8E1,stroke:#F57F17,color:#E65100
+
+    CLIENT([Client]) -->|"HTTPS<br/>(public cert OR self-signed)"| DNS
+
+    DNS[Route 53 / DNS]:::edge
+    DNS --> NLB
+
+    NLB["NLB :50443<br/>passthrough (TCP)<br/>no TLS termination"]:::edge
+    NLB -->|"TLS still encrypted<br/>(NLB acts at L4)"| KSVC
+
+    KSVC[K8s Service<br/>type=LoadBalancer]:::edge
+    KSVC --> POD
+
+    POD["Pod: uvicorn :50443<br/>terminates TLS here<br/>cert mounted at /app/certs/"]:::enc
+    POD -->|cleartext localhost| APP
+
+    APP["FastAPI App<br/>plain HTTP inside pod"]:::plain
+    APP -->|"TLS to PG (sslmode=require)"| PG[(PostgreSQL)]:::enc
+    APP -->|"HTTPS · TLS 1.2+"| RDS[(AWS RDS API)]:::enc
+    APP -->|"HTTPS"| SLACK([Slack]):::enc
+```
+
+---
+
 ## Infrastructure
 
 ### AWS — Terraform Modules (`provisioning/terraform/aws/web_infra/`)
@@ -420,30 +869,218 @@ CREATE TABLE user_info (
 
 ## CI/CD Pipeline
 
-### GitHub Actions Workflows (`actions/`)
+Six workflows live under [`.github/workflows/`](.github/workflows/) — one per (app × cloud) combination plus a standalone Trivy scan. Each pipeline is a 9-stage DevSecOps flow: secret-scan → SAST → SCA → build → container-scan → IaC-scan → deploy → DAST → notify.
 
-#### `Deploy-GKE.yml` — GKE DevSecOps Pipeline
+### DevSecOps Pipeline — 9-Stage Flow
 
-Triggers on push to `testing_on_gcp` or `master` branches.
+```mermaid
+flowchart LR
+    classDef trigger fill:#FFF8E1,stroke:#F57F17,color:#E65100
+    classDef sec fill:#FCE4EC,stroke:#AD1457,color:#880E4F
+    classDef build fill:#E0F7FA,stroke:#00838F,color:#006064
+    classDef deploy fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
+    classDef dast fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
+    classDef notify fill:#FFEBEE,stroke:#C62828,color:#B71C1C
 
+    PUSH(["git push<br/>main · master · PR"]):::trigger
+
+    PUSH --> S1
+    S1["1. 🔍 Secret Scan<br/>TruffleHog + GitLeaks"]:::sec
+    S1 --> S2 & S3
+    S2["2. 🔬 SAST<br/>Bandit + Semgrep<br/>p/owasp-top-ten · p/jwt"]:::sec
+    S3["3. 📦 SCA<br/>pip-audit + Trivy FS<br/>severity HIGH/CRITICAL"]:::sec
+
+    S2 --> S4
+    S3 --> S4
+    S4["4. 🐳 Build & Push<br/>docker build → ECR/ACR/GCR<br/>OIDC auth (no static keys)<br/>tag=git.sha + latest"]:::build
+
+    S4 --> S5 & S6
+    S5["5. 🔎 Container Scan<br/>Trivy image scan<br/>HIGH + CRITICAL → SARIF"]:::sec
+    S6["6. 🏗️ IaC Scan<br/>Checkov Terraform + K8s"]:::sec
+
+    S5 --> S7
+    S6 --> S7
+    S7["7. 🚀 Deploy<br/>aws eks update-kubeconfig<br/>envsubst &lt; *.yaml | kubectl apply<br/>kubectl rollout status (5m)"]:::deploy
+
+    S7 --> S8
+    S8["8. ⚡ DAST<br/>OWASP ZAP Baseline<br/>(main/master only)"]:::dast
+
+    S7 --> S9
+    S8 --> S9
+    S9["9. 📣 Notify<br/>Slack webhook<br/>deploy + DAST results"]:::notify
+
+    S2 -.SARIF.-> GHSEC[(GitHub Security<br/>Code Scanning tab)]
+    S3 -.SARIF.-> GHSEC
+    S5 -.SARIF.-> GHSEC
+    S6 -.SARIF.-> GHSEC
+    S1 -.SARIF.-> GHSEC
 ```
-Push to branch
-    │
-    ├── [Test]      Run pytest unit tests
-    ├── [Scan]      Trivy filesystem scan (CRITICAL) → SARIF upload
-    ├── [Build]     Docker build + push to GCR
-    └── [Deploy]    kubectl apply → GKE (admin-ui + user-ui deployments)
+
+### Pipeline Stage Dependency Graph
+
+Showing job-level `needs:` dependencies (concurrency in green, gates in red).
+
+```mermaid
+flowchart TB
+    classDef parallel fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
+    classDef gate fill:#FFEBEE,stroke:#C62828,color:#B71C1C
+    classDef cond fill:#FFF8E1,stroke:#F57F17,color:#E65100
+
+    subgraph WAVE1["▶ Wave 1 — runs in parallel"]
+        direction LR
+        J1[secret-scan]:::parallel
+        J2[sast]:::parallel
+        J3[sca]:::parallel
+        J7[iac-scan]:::parallel
+    end
+
+    WAVE1 --> GATE1{needs: secret-scan<br/>+ sast + sca}:::gate
+    GATE1 --> J4[build]:::parallel
+
+    J4 --> WAVE2
+
+    subgraph WAVE2["▶ Wave 2 — parallel after build"]
+        direction LR
+        J5[container-scan]:::parallel
+    end
+
+    WAVE2 --> GATE2{needs: build<br/>+ container-scan<br/>+ iac-scan}:::gate
+    J7 --> GATE2
+    GATE2 --> J6[deploy<br/>environment: staging/prod<br/>requires approval]:::parallel
+
+    J6 --> COND{ref == main / master?}:::cond
+    COND -->|yes| J8[dast]:::parallel
+    COND -->|no| J9
+    J8 --> J9[notify<br/>if: always]:::parallel
+    J6 --> J9
 ```
 
-#### `Deploy-EKS-ADMIN.yml` / `Deploy-EKS-USER.yml` — EKS Pipelines
+### GitOps Reconciliation Loop (ArgoCD)
 
-Similar stages targeting AWS EKS with ECR as the image registry.
+The DevSecOps pipeline pushes container images; ArgoCD pulls manifest changes from the same Git repo and reconciles cluster state. See [`argocd/helm/`](argocd/helm/).
 
-#### `trivy-scan.yaml` — Standalone Security Scan
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant Repo as GitHub Repo<br/>(source of truth)
+    participant GHA as GitHub Actions
+    participant Reg as ECR / ACR / GCR
+    participant Argo as ArgoCD Controller
+    participant K8s as Kubernetes API
+    participant Pod as Workload Pods
 
-- Trivy filesystem vulnerability scanning on every PR.
-- Severity filter: `CRITICAL`.
-- Results uploaded as SARIF to GitHub Security tab.
+    Dev->>Repo: git push (code + manifests)
+    Repo->>GHA: trigger workflow
+
+    Note over GHA: Stages 1–6 — sec scans, build, image scan
+    GHA->>Reg: docker push (tag=git.sha)
+
+    par Pipeline-driven deploy
+        GHA->>K8s: kubectl apply (envsubst manifests)
+        K8s->>Pod: rolling update
+        Pod-->>K8s: ready
+        GHA->>GHA: rollout status + smoke test + ZAP
+    and GitOps reconciliation (continuous)
+        loop every 3 min poll
+            Argo->>Repo: git fetch HEAD
+            Argo->>Argo: diff against live state
+            alt drift detected
+                Argo->>K8s: apply / prune / sync
+                K8s->>Pod: reconcile
+                Pod-->>Argo: status
+            else in sync
+                Argo->>Argo: no-op
+            end
+        end
+    end
+
+    Pod-->>K8s: liveness / readiness OK
+    K8s-->>Dev: deployment healthy<br/>(visible in ArgoCD UI + Slack notify)
+```
+
+### Security Scanning Coverage Matrix
+
+Each tool maps to specific OWASP Top 10 categories and pipeline stages.
+
+```mermaid
+flowchart LR
+    classDef tool fill:#FCE4EC,stroke:#AD1457,color:#880E4F
+    classDef owasp fill:#E8EAF6,stroke:#283593,color:#1A237E
+    classDef stage fill:#FFF8E1,stroke:#F57F17,color:#E65100
+
+    subgraph TOOLS["Security Tools"]
+        TH[TruffleHog]:::tool
+        GL[GitLeaks]:::tool
+        BD[Bandit]:::tool
+        SG[Semgrep]:::tool
+        PA[pip-audit]:::tool
+        TF[Trivy FS]:::tool
+        TI[Trivy Image]:::tool
+        CK[Checkov]:::tool
+        ZP[OWASP ZAP]:::tool
+    end
+
+    subgraph STAGES["Pipeline Stages"]
+        SS[Secret Scan]:::stage
+        SAST[SAST]:::stage
+        SCA[SCA]:::stage
+        CS[Container Scan]:::stage
+        IAC[IaC Scan]:::stage
+        DAST[DAST]:::stage
+    end
+
+    subgraph OWASP["OWASP Top 10 (2021)"]
+        A01[A01 Access Control]:::owasp
+        A02[A02 Crypto Failures]:::owasp
+        A03[A03 Injection]:::owasp
+        A05[A05 Misconfig]:::owasp
+        A06[A06 Vulnerable Deps]:::owasp
+        A07[A07 Auth Failures]:::owasp
+        A09[A09 Logging Failures]:::owasp
+        A10[A10 SSRF]:::owasp
+    end
+
+    TH --> SS
+    GL --> SS
+    SS --> A02
+
+    BD --> SAST
+    SG --> SAST
+    SAST --> A01
+    SAST --> A03
+    SAST --> A07
+
+    PA --> SCA
+    TF --> SCA
+    SCA --> A06
+
+    TI --> CS
+    CS --> A06
+    CS --> A05
+
+    CK --> IAC
+    IAC --> A05
+
+    ZP --> DAST
+    DAST --> A01
+    DAST --> A03
+    DAST --> A05
+    DAST --> A09
+    DAST --> A10
+```
+
+### Workflow Files
+
+| Workflow | App | Target Cloud | Image Registry |
+|---|---|---|---|
+| [`devsecops-fastapi-user-eks.yml`](.github/workflows/devsecops-fastapi-user-eks.yml)   | USER  | AWS EKS   | ECR |
+| [`devsecops-fastapi-admin-eks.yml`](.github/workflows/devsecops-fastapi-admin-eks.yml) | ADMIN | AWS EKS   | ECR |
+| [`devsecops-fastapi-user-gke.yml`](.github/workflows/devsecops-fastapi-user-gke.yml)   | USER  | GCP GKE   | Artifact Registry |
+| [`devsecops-fastapi-admin-gke.yml`](.github/workflows/devsecops-fastapi-admin-gke.yml) | ADMIN | GCP GKE   | Artifact Registry |
+| [`devsecops-fastapi-user-aks.yml`](.github/workflows/devsecops-fastapi-user-aks.yml)   | USER  | Azure AKS | Azure ACR |
+| [`devsecops-fastapi-admin-aks.yml`](.github/workflows/devsecops-fastapi-admin-aks.yml) | ADMIN | Azure AKS | Azure ACR |
+| [`trivy-scan.yaml`](.github/workflows/trivy-scan.yaml) | (standalone) | — | — |
 
 ---
 
