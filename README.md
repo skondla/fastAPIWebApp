@@ -42,7 +42,6 @@ A multi-cloud, containerized web application and REST API for managing AWS RDS d
 - [Getting Started](#getting-started)
 - [Usage — cURL Examples](#usage--curl-examples)
 - [Screenshots](#screenshots)
-- [DevSecOps Pipeline Diagrams](#devsecops-pipeline-diagrams)
 - [Contact](#contact)
 
 ---
@@ -1272,19 +1271,6 @@ AttachDB page 2:
 DB Restore Options after login:
 
 ![Alt text](images/db_restore_options_after_login.png)
-
----
-
-## DevSecOps Pipeline Diagrams
-
-### AKS (Azure Kubernetes Service)
-![Alt text](images/DevSecOps_with_GutHub_Actions_AKS.png)
-
-### EKS (AWS Elastic Kubernetes Service)
-![Alt text](images/DevSecOps_with_GutHub_Actions_EKS.png)
-
-### GKE (Google Kubernetes Engine)
-![Alt text](images/DevSecOps_with_GutHub_Actions_GKE.png)
 
 ---
 
