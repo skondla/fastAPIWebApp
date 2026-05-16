@@ -76,69 +76,69 @@ flowchart TB
     classDef cicd fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px,color:#4A148C
     classDef k8s fill:#E0F7FA,stroke:#00838F,stroke-width:2px,color:#006064
 
-    subgraph Clients["👥 Clients"]
-        B[Browser<br/>HTML + Jinja2]
-        C[cURL / API Client<br/>JSON + Bearer Token]
-        S[Swagger UI<br/>/api/docs]
+    subgraph Clients["Clients"]
+        B["Browser<br/>HTML + Jinja2"]
+        C["cURL or API Client<br/>JSON + Bearer Token"]
+        S["Swagger UI<br/>/api/docs"]
     end
 
-    subgraph Edge["🌐 Edge — TLS Termination"]
-        LB[AWS NLB / ALB<br/>or Azure LB / GCP LB<br/>HTTPS]
+    subgraph Edge["Edge — TLS Termination"]
+        LB["AWS NLB or ALB<br/>Azure LB or GCP LB<br/>HTTPS"]
     end
 
-    subgraph K8s["☸️ Kubernetes (EKS / GKE / AKS)"]
+    subgraph K8s["Kubernetes EKS GKE AKS"]
         subgraph UserNS["fastapi-namespace"]
-            U1[USER_FASTAPI Pod<br/>:50443<br/>x3 replicas]
+            U1["USER_FASTAPI Pod<br/>port 50443<br/>x3 replicas"]
         end
         subgraph AdminNS["fastapi-admin-namespace"]
-            A1[ADMIN_FASTAPI Pod<br/>:30443<br/>x3 replicas]
+            A1["ADMIN_FASTAPI Pod<br/>port 30443<br/>x3 replicas"]
         end
-        HPA[HPA<br/>min=2 max=10<br/>cpu=70% mem=80%]
+        HPA["HPA<br/>min=2 max=10<br/>cpu 70 mem 80"]
     end
 
-    subgraph DataLayer["💾 Data Layer"]
-        PG[(PostgreSQL<br/>users · user_info<br/>SQLAlchemy 2.0)]
+    subgraph DataLayer["Data Layer"]
+        PG[("PostgreSQL<br/>users · user_info<br/>SQLAlchemy 2.0")]
     end
 
-    subgraph AWSManaged["☁️ AWS Managed Services"]
-        RDS[(RDS / Aurora<br/>Restore · Status · Attach<br/>via boto3)]
-        SES[SES<br/>Email Alerts]
-        ECR[(ECR<br/>Container Registry)]
-        SM[Secrets Manager<br/>DB credentials]
+    subgraph AWSManaged["AWS Managed Services"]
+        RDS[("RDS or Aurora<br/>Restore · Status · Attach<br/>via boto3")]
+        SES["SES<br/>Email Alerts"]
+        ECR[("ECR<br/>Container Registry")]
+        SM["Secrets Manager<br/>DB credentials"]
     end
 
-    subgraph Notify["📣 Notifications"]
-        SLACK[Slack Webhook]
+    subgraph Notify["Notifications"]
+        SLACK["Slack Webhook"]
     end
 
-    subgraph Control["🛠️ Control Plane"]
-        GH[GitHub<br/>source of truth]
-        GHA[GitHub Actions<br/>DevSecOps Pipeline]
-        ARGO[ArgoCD<br/>GitOps reconciler]
+    subgraph Control["Control Plane"]
+        GH["GitHub<br/>source of truth"]
+        GHA["GitHub Actions<br/>DevSecOps Pipeline"]
+        ARGO["ArgoCD<br/>GitOps reconciler"]
     end
 
-    B -->|HTTPS 50443/30443| LB
-    C -->|HTTPS Bearer| LB
-    S -->|HTTPS| LB
+    B -->|"HTTPS 50443 or 30443"| LB
+    C -->|"HTTPS Bearer"| LB
+    S -->|"HTTPS"| LB
     LB --> U1
     LB --> A1
-    HPA -.scales.-> U1
-    HPA -.scales.-> A1
+    HPA -.->|scales| U1
+    HPA -.->|scales| A1
 
-    U1 -->|SQL TCP 5432| PG
-    A1 -->|SQL TCP 5432| PG
-    U1 -->|HTTPS API| RDS
-    U1 -->|SMTP| SES
-    U1 -->|Webhook| SLACK
-    U1 -.fetch creds.-> SM
-    A1 -.fetch creds.-> SM
+    U1 -->|"SQL TCP 5432"| PG
+    A1 -->|"SQL TCP 5432"| PG
+    U1 -->|"HTTPS API"| RDS
+    U1 -->|"SMTP"| SES
+    U1 -->|"Webhook"| SLACK
+    U1 -.->|"fetch creds"| SM
+    A1 -.->|"fetch creds"| SM
 
-    GH -->|push| GHA
-    GHA -->|push image| ECR
-    GHA -->|kubectl apply| K8s
-    ECR -->|pull image| K8s
-    ARGO -->|reconcile| K8s
-    GH -->|manifests| ARGO
+    GH -->|"push"| GHA
+    GHA -->|"push image"| ECR
+    GHA -->|"kubectl apply"| K8s
+    ECR -->|"pull image"| K8s
+    ARGO -->|"reconcile"| K8s
+    GH -->|"manifests"| ARGO
 
     class B,C,S client
     class U1,A1 app
@@ -161,12 +161,12 @@ flowchart LR
     classDef model fill:#E0F2F1,stroke:#00695C,stroke-width:2px,color:#004D40
 
     REQ([HTTP Request]) --> MW1
-    subgraph MWChain["Middleware Chain  (LIFO — last added runs first)"]
+    subgraph MWChain["Middleware Chain — LIFO order"]
         direction LR
-        MW1[CORS<br/>Middleware]
-        MW2[RateLimit<br/>200/min · 10/min auth]
-        MW3[SecurityHeaders<br/>HSTS · CSP · X-Frame]
-        MW4[SecurityAudit<br/>structured log]
+        MW1["CORS<br/>Middleware"]
+        MW2["RateLimit<br/>200/min · 10/min auth"]
+        MW3["SecurityHeaders<br/>HSTS · CSP · X-Frame"]
+        MW4["SecurityAudit<br/>structured log"]
         MW1 --> MW2 --> MW3 --> MW4
     end
 
@@ -174,37 +174,37 @@ flowchart LR
 
     subgraph ROUTER["FastAPI Router Dispatch"]
         direction TB
-        AUTH[auth.py<br/>/login /signup /logout<br/>/auth/token /auth/refresh<br/>/auth/me /auth/register]
-        MAIN[main_router.py<br/>/ /restore /status /attachdb<br/>/profile]
+        AUTH["auth.py<br/>/login · /signup · /logout<br/>/auth/token · /auth/refresh<br/>/auth/me · /auth/register"]
+        MAIN["main_router.py<br/>/ · /restore · /status<br/>/attachdb · /profile"]
     end
 
     AUTH --> SEC
     MAIN --> SEC
 
-    subgraph SEC["Security Layer (security.py)"]
+    subgraph SEC["Security Layer · security.py"]
         direction TB
-        JWT[JWT OAuth 2.0<br/>HS256 · 30 min access<br/>7 day refresh]
-        BCRYPT[bcrypt + passlib<br/>+ werkzeug fallback]
-        DEPS[FastAPI Depends<br/>get_current_user<br/>get_optional_user]
-        SSRF[SSRF Guard<br/>validate_rds_endpoint]
+        JWT["JWT OAuth 2.0<br/>HS256 · 30 min access<br/>7 day refresh"]
+        BCRYPT["bcrypt + passlib<br/>+ werkzeug fallback"]
+        DEPS["FastAPI Depends<br/>get_current_user<br/>get_optional_user"]
+        SSRF["SSRF Guard<br/>validate_rds_endpoint"]
     end
 
     SEC --> DAL
 
     subgraph DAL["Data Access Layer"]
         direction TB
-        SQLA[SQLAlchemy 2.0<br/>Session per-request]
-        MODELS[models.py<br/>User · Userinfo]
-        SCHEMAS[schemas.py<br/>Pydantic v2 DTOs]
+        SQLA["SQLAlchemy 2.0<br/>Session per request"]
+        MODELS["models.py<br/>User · Userinfo"]
+        SCHEMAS["schemas.py<br/>Pydantic v2 DTOs"]
         SQLA --> MODELS
         SQLA --> SCHEMAS
     end
 
-    DAL --> PG[(PostgreSQL)]
+    DAL --> PG[("PostgreSQL")]
 
-    MAIN -->|boto3| AWS_RDS[(AWS RDS / Aurora)]
-    MAIN -->|requests| SLACK([Slack])
-    MAIN -->|mailx| SES([AWS SES])
+    MAIN -->|"boto3"| AWS_RDS[("AWS RDS or Aurora")]
+    MAIN -->|"requests"| SLACK([Slack])
+    MAIN -->|"mailx"| SES([AWS SES])
 
     class MW1,MW2,MW3,MW4 mw
     class AUTH,MAIN route
@@ -223,32 +223,32 @@ flowchart TB
     classDef az  fill:#E8EAF6,stroke:#283593,color:#1A237E
     classDef gh  fill:#F3E5F5,stroke:#6A1B9A,color:#4A148C
 
-    GH[("📦 GitHub Repo<br/>fastAPIWebApp")]:::gh
+    GH[("GitHub Repo<br/>fastAPIWebApp")]:::gh
 
     GH --> AWSP
     GH --> GCPP
     GH --> AZP
 
-    subgraph AWSP["☁️ AWS — us-east-1"]
-        ECR[(ECR<br/>fastapi-user-app<br/>fastapi-admin-app)]:::aws
-        EKS[EKS Cluster<br/>fastapi-demo-cluster<br/>private + public subnets<br/>2 AZ · NAT GW]:::aws
-        AWSRDS[(RDS / Aurora<br/>Multi-AZ)]:::aws
+    subgraph AWSP["AWS — us-east-1"]
+        ECR[("ECR<br/>fastapi-user-app<br/>fastapi-admin-app")]:::aws
+        EKS["EKS Cluster<br/>fastapi-demo-cluster<br/>private + public subnets<br/>2 AZ · NAT GW"]:::aws
+        AWSRDS[("RDS or Aurora<br/>Multi-AZ")]:::aws
         ECR --> EKS
         EKS --> AWSRDS
     end
 
-    subgraph GCPP["☁️ GCP — us-central1"]
-        GCR[(Artifact Registry)]:::gcp
-        GKE[GKE Cluster<br/>VPC-native · regional<br/>workload identity]:::gcp
-        CSQL[(Cloud SQL Postgres)]:::gcp
+    subgraph GCPP["GCP — us-central1"]
+        GCR[("Artifact Registry")]:::gcp
+        GKE["GKE Cluster<br/>VPC-native · regional<br/>workload identity"]:::gcp
+        CSQL[("Cloud SQL Postgres")]:::gcp
         GCR --> GKE
         GKE --> CSQL
     end
 
-    subgraph AZP["☁️ Azure — eastus"]
-        ACR[(Azure ACR<br/>fastapiregistry)]:::az
-        AKS[AKS Cluster<br/>fastapi-aks-cluster<br/>VNet + system pool]:::az
-        AZDB[(Azure Database<br/>for PostgreSQL)]:::az
+    subgraph AZP["Azure — eastus"]
+        ACR[("Azure ACR<br/>fastapiregistry")]:::az
+        AKS["AKS Cluster<br/>fastapi-aks-cluster<br/>VNet + system pool"]:::az
+        AZDB[("Azure Database<br/>for PostgreSQL")]:::az
         ACR --> AKS
         AKS --> AZDB
     end
@@ -510,46 +510,47 @@ OAuth 2.0 password-flow with bcrypt verification and HttpOnly cookie + Bearer he
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Client (Browser / API)
-    participant LB as NLB :50443
-    participant MW as Middleware Chain<br/>(rate-limit · headers · audit)
-    participant Auth as auth.py<br/>POST /auth/token
-    participant Sec as security.py
-    participant DB as PostgreSQL<br/>users table
+    actor User as "Client<br/>Browser or API"
+    participant LB as "NLB<br/>port 50443"
+    participant MW as "Middleware Chain<br/>rate-limit · headers · audit"
+    participant Auth as "auth.py<br/>POST /auth/token"
+    participant Sec as "security.py"
+    participant DB as "PostgreSQL<br/>users table"
 
-    User->>LB: POST /auth/token (username, password)
+    User->>LB: POST /auth/token<br/>username + password
     LB->>MW: forward HTTPS
-    MW->>MW: rate-limit check (10/min for /auth)
+    MW->>MW: rate-limit check<br/>10/min for /auth
     MW->>Auth: dispatch
-    Auth->>DB: SELECT * FROM users WHERE email=?
+    Auth->>DB: SELECT * FROM users WHERE email = ?
     DB-->>Auth: user row + hashed pw
-    Auth->>Sec: verify_password(plain, hashed)
+    Auth->>Sec: verify_password plain, hashed
 
     alt bcrypt matches
         Sec-->>Auth: True
     else fallback to werkzeug pbkdf2
-        Sec->>Sec: check_password_hash(legacy)
-        Sec-->>Auth: True / False
+        Sec->>Sec: check_password_hash legacy
+        Sec-->>Auth: True or False
     end
 
-    alt valid
-        Auth->>Sec: create_access_token(sub=email, exp=30m)
-        Auth->>Sec: create_refresh_token(sub=email, exp=7d)
-        Sec-->>Auth: access_jwt, refresh_jwt
-        Auth-->>User: 200 {access_token, refresh_token}<br/>+ Set-Cookie: access_token (HttpOnly)
-    else invalid
-        Auth-->>User: 401 Unauthorized<br/>WWW-Authenticate: Bearer
+    alt credentials valid
+        Auth->>Sec: create_access_token<br/>sub=email · exp=30m
+        Auth->>Sec: create_refresh_token<br/>sub=email · exp=7d
+        Sec-->>Auth: access_jwt + refresh_jwt
+        Auth-->>User: 200 OK<br/>access_token + refresh_token<br/>Set-Cookie HttpOnly
+    else credentials invalid
+        Auth-->>User: 401 Unauthorized<br/>WWW-Authenticate Bearer
     end
 
     Note over User,DB: Subsequent protected request
-    User->>LB: GET /restore<br/>Cookie: access_token=Bearer&lt;jwt&gt;
+
+    User->>LB: GET /restore<br/>Cookie access_token=Bearer JWT
     LB->>MW: forward
-    MW->>Sec: get_current_user (Depends)
-    Sec->>Sec: decode JWT (HS256, SECRET_KEY)
+    MW->>Sec: get_current_user via Depends
+    Sec->>Sec: decode JWT<br/>HS256 · SECRET_KEY
     Sec->>DB: lookup user by sub claim
     DB-->>Sec: user
     Sec-->>MW: User object
-    MW-->>User: 200 (restore page)
+    MW-->>User: 200 OK<br/>restore page HTML
 ```
 
 ### RDS Restore Operation — End-to-End
@@ -559,56 +560,56 @@ Full data flow for `POST /restore` — from form submission through AWS RDS API 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as Authenticated User
-    participant API as USER_FASTAPI<br/>POST /restore
-    participant SSRF as SSRF Validator<br/>validate_rds_endpoint
-    participant RDS as boto3 RDS Client
-    participant AWS as AWS RDS / Aurora
-    participant PG as PostgreSQL<br/>user_info (audit)
-    participant SLACK as Slack Webhook
-    participant SES as AWS SES
+    actor U as "Authenticated User"
+    participant API as "USER_FASTAPI<br/>POST /restore"
+    participant SSRF as "SSRF Validator<br/>validate_rds_endpoint"
+    participant RDS as "boto3 RDS Client"
+    participant AWS as "AWS RDS or Aurora"
+    participant PG as "PostgreSQL<br/>user_info audit table"
+    participant SLACK as "Slack Webhook"
+    participant SES as "AWS SES"
 
-    U->>API: POST /restore<br/>{snapshotname, endpoint}
-    API->>API: get_optional_user → require auth
-    API->>SSRF: validate_rds_endpoint(endpoint)
+    U->>API: POST /restore<br/>snapshotname + endpoint
+    API->>API: get_optional_user<br/>enforce auth
+    API->>SSRF: validate_rds_endpoint endpoint
 
-    alt invalid hostname (private IP, non-RDS pattern)
+    alt invalid hostname<br/>private IP or non-RDS pattern
         SSRF-->>API: raise ValueError
         API-->>U: 400 Bad Request
     else valid AWS RDS hostname
         SSRF-->>API: ok
-        API->>RDS: dbInstanceInfo(endpoint)
-        RDS->>AWS: DescribeDBInstances / DescribeDBClusters
-        AWS-->>RDS: SG, subnet, engine, version, class
+        API->>RDS: dbInstanceInfo endpoint
+        RDS->>AWS: DescribeDBInstances or DescribeDBClusters
+        AWS-->>RDS: SG · subnet · engine · version · class
         RDS-->>API: instance metadata
 
         alt endpoint is cluster
-            API->>RDS: restore_db_cluster_from_snapshot(...)
+            API->>RDS: restore_db_cluster_from_snapshot
             RDS->>AWS: RestoreDBClusterFromSnapshot
         else endpoint is instance
-            API->>RDS: restore_db_instance_from_db_snapshot(...)
+            API->>RDS: restore_db_instance_from_db_snapshot
             RDS->>AWS: RestoreDBInstanceFromDBSnapshot
         end
-        AWS-->>RDS: DBClusterIdentifier / DBInstanceIdentifier
+        AWS-->>RDS: DBClusterIdentifier or DBInstanceIdentifier
         RDS-->>API: success
 
-        API->>RDS: getDBClusterStatus / getDBInstanceStatus
-        RDS->>AWS: DescribeDB*
-        AWS-->>RDS: state (creating / available / ...)
+        API->>RDS: getDBClusterStatus or getDBInstanceStatus
+        RDS->>AWS: DescribeDB
+        AWS-->>RDS: state creating · available
         RDS-->>API: db_state
 
         par audit log
-            API->>PG: INSERT INTO user_info<br/>(email, ip, time, requesttype='DB Restore', endpoint)
+            API->>PG: INSERT INTO user_info<br/>email · ip · time · requesttype · endpoint
             PG-->>API: ok
         and Slack notification
-            API->>SLACK: POST {channel, text, icon_emoji}
+            API->>SLACK: POST channel + text + icon_emoji
             SLACK-->>API: 200
         and email alert
-            API->>SES: mailx -s 'dB Restore' &lt;distro&gt;
+            API->>SES: mailx -s dB Restore distro
             SES-->>API: queued
         end
 
-        API-->>U: 202 Accepted<br/>"Database X is being restored.<br/>New Endpoint: ... Status: ..."
+        API-->>U: 202 Accepted<br/>Database X is being restored<br/>New Endpoint and Status returned
     end
 ```
 
@@ -617,39 +618,61 @@ sequenceDiagram
 Every request traverses four middleware layers before reaching a route handler. Order is LIFO — last added runs first.
 
 ```mermaid
-flowchart LR
+flowchart TB
     classDef pass fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
     classDef block fill:#FFEBEE,stroke:#C62828,color:#B71C1C
     classDef route fill:#E8EAF6,stroke:#283593,color:#1A237E
+    classDef phase fill:#FFF8E1,stroke:#F57F17,color:#E65100
 
-    REQ([HTTPS Request])
-    REQ --> AUDIT
+    REQ([HTTPS Request]):::phase
 
-    AUDIT["1️⃣  SecurityAuditMiddleware<br/>start timer · capture IP"]:::pass
-    AUDIT --> HEADERS
+    subgraph REQPATH["Request Path  (outer to inner)"]
+        direction TB
+        AUDIT_IN["1. SecurityAuditMiddleware<br/>start timer · capture client IP"]:::pass
+        RATE{"2. RateLimitMiddleware<br/>200/min general<br/>10/min auth endpoints"}
+        R429["429 Too Many Requests<br/>Retry-After 60"]:::block
+        HDR_IN["3. SecurityHeadersMiddleware<br/>pass-through on request"]:::pass
+        CORS["4. CORSMiddleware<br/>origin · methods · headers"]:::pass
+    end
 
-    HEADERS["2️⃣  SecurityHeadersMiddleware<br/>(applied to response)<br/>HSTS · CSP · X-Frame · nosniff"]:::pass
-    HEADERS --> RATE
+    ROUTE["FastAPI Router Dispatch<br/>Depends get_current_user · get_db"]:::route
 
-    RATE{"3️⃣  RateLimitMiddleware<br/>200/min general<br/>10/min auth endpoints"}
-    RATE -->|over limit| R429["429 Too Many Requests<br/>Retry-After: 60"]:::block
-    RATE -->|under limit| CORS
+    subgraph HANDLERS["Route Handler Outcomes"]
+        direction TB
+        OK(["200 / 2xx Response"]):::pass
+        REDIR["401 on HTML request<br/>302 to /login?next=PATH"]:::block
+        JSON401["401 on JSON request<br/>WWW-Authenticate Bearer"]:::block
+        ERR(["4xx or 5xx Error"]):::block
+    end
 
-    CORS["4️⃣  CORSMiddleware<br/>* / credentials / methods / headers"]:::pass
+    subgraph RESPATH["Response Path  (inner to outer)"]
+        direction TB
+        HDR_OUT["SecurityHeadersMiddleware<br/>inject HSTS · CSP · X-Frame<br/>nosniff · Referrer-Policy"]:::pass
+        AUDIT_OUT["SecurityAuditMiddleware<br/>log method · path · status<br/>ip · ua · duration_ms"]:::pass
+    end
+
+    OUT([HTTPS Response]):::phase
+
+    REQ --> AUDIT_IN
+    AUDIT_IN --> RATE
+    RATE -->|under limit| HDR_IN
+    RATE -->|over limit| R429
+    HDR_IN --> CORS
     CORS --> ROUTE
 
-    ROUTE["FastAPI Router<br/>dependency injection<br/>(get_current_user · get_db)"]:::route
-    ROUTE -->|401| AUTH_REDIR["HTML req → 302 /login?next=&lt;path&gt;<br/>JSON req → 401 JSON"]:::block
-    ROUTE -->|200 / 2xx| RESP([Response])
-    ROUTE -->|400 / 500| ERR(["Error response"]):::block
+    ROUTE --> OK
+    ROUTE --> REDIR
+    ROUTE --> JSON401
+    ROUTE --> ERR
 
-    RESP --> HEADERS
-    ERR --> HEADERS
-    AUTH_REDIR --> HEADERS
+    OK --> HDR_OUT
+    REDIR --> HDR_OUT
+    JSON401 --> HDR_OUT
+    ERR --> HDR_OUT
+    R429 --> HDR_OUT
 
-    R429 --> AUDIT_OUT
-    HEADERS --> AUDIT_OUT["AUDIT log emitted<br/>(method · path · status · ip · duration_ms)"]:::pass
-    AUDIT_OUT --> OUT([HTTPS Response])
+    HDR_OUT --> AUDIT_OUT
+    AUDIT_OUT --> OUT
 ```
 
 ---
@@ -672,32 +695,32 @@ flowchart TB
 
     INET <--> IGW
 
-    subgraph VPC["VPC  k8svpc  ·  192.168.0.0/16  ·  us-east-1"]
+    subgraph VPC["VPC k8svpc · 192.168.0.0/16 · us-east-1"]
         direction TB
 
         subgraph AZA["Availability Zone us-east-1a"]
-            PUBA["public-us-east-1a<br/>192.168.64.0/19<br/>map_public_ip=true<br/>kubernetes.io/role/elb=1"]:::public
-            PRIA["private-us-east-1a<br/>192.168.0.0/19<br/>kubernetes.io/role/internal-elb=1"]:::private
-            NATA[NAT Gateway A]:::ctrl
-            NLBA[NLB Node A<br/>:50443 / :30443]:::public
-            NODEA[EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod]:::private
+            PUBA["public-us-east-1a<br/>192.168.64.0/19<br/>map_public_ip=true<br/>tag kubernetes.io/role/elb"]:::public
+            PRIA["private-us-east-1a<br/>192.168.0.0/19<br/>tag kubernetes.io/role/internal-elb"]:::private
+            NATA["NAT Gateway A"]:::ctrl
+            NLBA["NLB Node A<br/>ports 50443 and 30443"]:::public
+            NODEA["EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod"]:::private
         end
 
         subgraph AZB["Availability Zone us-east-1b"]
             PUBB["public-us-east-1b<br/>192.168.96.0/19<br/>map_public_ip=true"]:::public
             PRIB["private-us-east-1b<br/>192.168.32.0/19"]:::private
-            NATB[NAT Gateway B]:::ctrl
-            NLBB[NLB Node B]:::public
-            NODEB[EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod]:::private
+            NATB["NAT Gateway B"]:::ctrl
+            NLBB["NLB Node B"]:::public
+            NODEB["EKS Worker<br/>fastapi-user-app pod<br/>fastapi-admin-app pod"]:::private
         end
 
-        EKSCTL["EKS Control Plane<br/>(AWS-managed)<br/>OIDC provider"]:::ctrl
+        EKSCTL["EKS Control Plane<br/>AWS-managed<br/>OIDC provider"]:::ctrl
     end
 
-    RDS[(Amazon RDS / Aurora<br/>Multi-AZ<br/>private subnets)]:::private
-    ECR[(Amazon ECR)]:::ext
-    SES[Amazon SES]:::ext
-    SLACK[Slack Webhook]:::ext
+    RDS[("Amazon RDS or Aurora<br/>Multi-AZ<br/>private subnets")]:::private
+    ECR[("Amazon ECR")]:::ext
+    SES["Amazon SES"]:::ext
+    SLACK["Slack Webhook"]:::ext
 
     IGW --> PUBA
     IGW --> PUBB
@@ -741,32 +764,32 @@ flowchart TB
     EXT([External Client<br/>HTTPS])
     EXT --> NLB
 
-    subgraph NS["Namespace: fastapi-namespace"]
-        NLB["Service: fastapi-user-app<br/>type=LoadBalancer (NLB)<br/>port 50443 → targetPort 50443<br/>backend-protocol=tcp"]:::svc
+    subgraph NS["Namespace fastapi-namespace"]
+        NLB["Service fastapi-user-app<br/>type LoadBalancer NLB<br/>port 50443 to targetPort 50443<br/>backend-protocol tcp"]:::svc
 
-        subgraph DEP["Deployment: fastapi-user-app  (replicas=3 · RollingUpdate maxSurge=1, maxUnavail=0)"]
+        subgraph DEP["Deployment fastapi-user-app · replicas=3 · RollingUpdate maxSurge=1 maxUnavail=0"]
             direction LR
-            P1[Pod #1<br/>uvicorn :50443<br/>nonRoot · seccomp]:::pod
-            P2[Pod #2<br/>uvicorn :50443]:::pod
-            P3[Pod #3<br/>uvicorn :50443]:::pod
+            P1["Pod 1<br/>uvicorn 50443<br/>nonRoot · seccomp"]:::pod
+            P2["Pod 2<br/>uvicorn 50443"]:::pod
+            P3["Pod 3<br/>uvicorn 50443"]:::pod
         end
 
-        INIT["initContainer: wait-for-db<br/>busybox · nc -z $shost $sport<br/>readOnlyRootFs · cap drop ALL"]:::pod
+        INIT["initContainer wait-for-db<br/>busybox · nc -z host port<br/>readOnlyRootFs · cap drop ALL"]:::pod
 
-        HPA["HorizontalPodAutoscaler<br/>min=2 max=10<br/>cpu 70% · mem 80%"]:::hpa
+        HPA["HorizontalPodAutoscaler<br/>min=2 max=10<br/>cpu 70 percent · mem 80 percent"]:::hpa
 
-        SECRET["Secret: fastapi-db-secret<br/>DB_HOST · DB_USER · DB_PASSWORD<br/>JWT_SECRET_KEY · AWS creds"]:::cfg
-        CM["ConfigMap: fastapi-config<br/>APP_NAME · APP_PORT<br/>AWS_REGION · LOG_LEVEL"]:::cfg
+        SECRET["Secret fastapi-db-secret<br/>DB_HOST · DB_USER · DB_PASSWORD<br/>JWT_SECRET_KEY · AWS creds"]:::cfg
+        CM["ConfigMap fastapi-config<br/>APP_NAME · APP_PORT<br/>AWS_REGION · LOG_LEVEL"]:::cfg
 
-        SA["ServiceAccount: fastapi-sa<br/>IRSA → IAM role (RDS, SES)<br/>automountToken=false"]:::cfg
+        SA["ServiceAccount fastapi-sa<br/>IRSA to IAM role RDS SES<br/>automountToken=false"]:::cfg
 
         SPREAD["topologySpreadConstraints<br/>maxSkew=1 · hostname<br/>DoNotSchedule"]:::hpa
 
-        TSC["Probes:<br/>startup 5s/12fail<br/>readiness 10s<br/>liveness 30s"]:::hpa
+        TSC["Probes<br/>startup 5s 12fail<br/>readiness 10s<br/>liveness 30s"]:::hpa
     end
 
-    PG[(PostgreSQL<br/>:5432)]
-    RDS[(AWS RDS API<br/>boto3)]
+    PG[("PostgreSQL<br/>port 5432")]
+    RDS[("AWS RDS API<br/>boto3")]
 
     NLB --> P1
     NLB --> P2
@@ -800,23 +823,23 @@ flowchart LR
     classDef enc fill:#FFEBEE,stroke:#C62828,color:#B71C1C
     classDef plain fill:#FFF8E1,stroke:#F57F17,color:#E65100
 
-    CLIENT([Client]) -->|"HTTPS<br/>(public cert OR self-signed)"| DNS
+    CLIENT([Client]) -->|"HTTPS<br/>public cert or self-signed"| DNS
 
-    DNS[Route 53 / DNS]:::edge
+    DNS["Route 53 or DNS"]:::edge
     DNS --> NLB
 
-    NLB["NLB :50443<br/>passthrough (TCP)<br/>no TLS termination"]:::edge
-    NLB -->|"TLS still encrypted<br/>(NLB acts at L4)"| KSVC
+    NLB["NLB port 50443<br/>passthrough TCP<br/>no TLS termination"]:::edge
+    NLB -->|"TLS still encrypted<br/>NLB acts at L4"| KSVC
 
-    KSVC[K8s Service<br/>type=LoadBalancer]:::edge
+    KSVC["K8s Service<br/>type LoadBalancer"]:::edge
     KSVC --> POD
 
-    POD["Pod: uvicorn :50443<br/>terminates TLS here<br/>cert mounted at /app/certs/"]:::enc
-    POD -->|cleartext localhost| APP
+    POD["Pod uvicorn 50443<br/>terminates TLS here<br/>cert mounted at /app/certs"]:::enc
+    POD -->|"cleartext localhost"| APP
 
     APP["FastAPI App<br/>plain HTTP inside pod"]:::plain
-    APP -->|"TLS to PG (sslmode=require)"| PG[(PostgreSQL)]:::enc
-    APP -->|"HTTPS · TLS 1.2+"| RDS[(AWS RDS API)]:::enc
+    APP -->|"TLS to PG<br/>sslmode=require"| PG[("PostgreSQL")]:::enc
+    APP -->|"HTTPS · TLS 1.2+"| RDS[("AWS RDS API")]:::enc
     APP -->|"HTTPS"| SLACK([Slack]):::enc
 ```
 
@@ -885,35 +908,38 @@ flowchart LR
     PUSH(["git push<br/>main · master · PR"]):::trigger
 
     PUSH --> S1
-    S1["1. 🔍 Secret Scan<br/>TruffleHog + GitLeaks"]:::sec
-    S1 --> S2 & S3
-    S2["2. 🔬 SAST<br/>Bandit + Semgrep<br/>p/owasp-top-ten · p/jwt"]:::sec
-    S3["3. 📦 SCA<br/>pip-audit + Trivy FS<br/>severity HIGH/CRITICAL"]:::sec
+    S1["1. Secret Scan<br/>TruffleHog + GitLeaks"]:::sec
+    S1 --> S2
+    S1 --> S3
+    S2["2. SAST<br/>Bandit + Semgrep<br/>p/owasp-top-ten · p/jwt"]:::sec
+    S3["3. SCA<br/>pip-audit + Trivy FS<br/>severity HIGH and CRITICAL"]:::sec
 
     S2 --> S4
     S3 --> S4
-    S4["4. 🐳 Build & Push<br/>docker build → ECR/ACR/GCR<br/>OIDC auth (no static keys)<br/>tag=git.sha + latest"]:::build
+    S4["4. Build and Push<br/>docker build to ECR ACR GCR<br/>OIDC auth · no static keys<br/>tag=git.sha + latest"]:::build
 
-    S4 --> S5 & S6
-    S5["5. 🔎 Container Scan<br/>Trivy image scan<br/>HIGH + CRITICAL → SARIF"]:::sec
-    S6["6. 🏗️ IaC Scan<br/>Checkov Terraform + K8s"]:::sec
+    S4 --> S5
+    S4 --> S6
+    S5["5. Container Scan<br/>Trivy image scan<br/>HIGH and CRITICAL · SARIF"]:::sec
+    S6["6. IaC Scan<br/>Checkov Terraform + K8s"]:::sec
 
     S5 --> S7
     S6 --> S7
-    S7["7. 🚀 Deploy<br/>aws eks update-kubeconfig<br/>envsubst &lt; *.yaml | kubectl apply<br/>kubectl rollout status (5m)"]:::deploy
+    S7["7. Deploy<br/>aws eks update-kubeconfig<br/>envsubst then kubectl apply<br/>kubectl rollout status 5m"]:::deploy
 
     S7 --> S8
-    S8["8. ⚡ DAST<br/>OWASP ZAP Baseline<br/>(main/master only)"]:::dast
+    S8["8. DAST<br/>OWASP ZAP Baseline<br/>main and master only"]:::dast
 
     S7 --> S9
     S8 --> S9
-    S9["9. 📣 Notify<br/>Slack webhook<br/>deploy + DAST results"]:::notify
+    S9["9. Notify<br/>Slack webhook<br/>deploy + DAST results"]:::notify
 
-    S2 -.SARIF.-> GHSEC[(GitHub Security<br/>Code Scanning tab)]
-    S3 -.SARIF.-> GHSEC
-    S5 -.SARIF.-> GHSEC
-    S6 -.SARIF.-> GHSEC
-    S1 -.SARIF.-> GHSEC
+    GHSEC[("GitHub Security<br/>Code Scanning tab")]
+    S1 -.->|"SARIF"| GHSEC
+    S2 -.->|"SARIF"| GHSEC
+    S3 -.->|"SARIF"| GHSEC
+    S5 -.->|"SARIF"| GHSEC
+    S6 -.->|"SARIF"| GHSEC
 ```
 
 ### Pipeline Stage Dependency Graph
@@ -926,32 +952,37 @@ flowchart TB
     classDef gate fill:#FFEBEE,stroke:#C62828,color:#B71C1C
     classDef cond fill:#FFF8E1,stroke:#F57F17,color:#E65100
 
-    subgraph WAVE1["▶ Wave 1 — runs in parallel"]
+    subgraph WAVE1["Wave 1 — runs in parallel"]
         direction LR
-        J1[secret-scan]:::parallel
-        J2[sast]:::parallel
-        J3[sca]:::parallel
-        J7[iac-scan]:::parallel
+        J1["secret-scan"]:::parallel
+        J2["sast"]:::parallel
+        J3["sca"]:::parallel
+        J7["iac-scan"]:::parallel
     end
 
-    WAVE1 --> GATE1{needs: secret-scan<br/>+ sast + sca}:::gate
-    GATE1 --> J4[build]:::parallel
+    GATE1{"needs<br/>secret-scan<br/>sast · sca"}:::gate
+    WAVE1 --> GATE1
+    GATE1 --> J4["build"]:::parallel
+
+    subgraph WAVE2["Wave 2 — parallel after build"]
+        direction LR
+        J5["container-scan"]:::parallel
+    end
 
     J4 --> WAVE2
 
-    subgraph WAVE2["▶ Wave 2 — parallel after build"]
-        direction LR
-        J5[container-scan]:::parallel
-    end
-
-    WAVE2 --> GATE2{needs: build<br/>+ container-scan<br/>+ iac-scan}:::gate
+    GATE2{"needs<br/>build · container-scan<br/>iac-scan"}:::gate
+    WAVE2 --> GATE2
     J7 --> GATE2
-    GATE2 --> J6[deploy<br/>environment: staging/prod<br/>requires approval]:::parallel
+    GATE2 --> J6["deploy<br/>environment staging or prod<br/>requires approval"]:::parallel
 
-    J6 --> COND{ref == main / master?}:::cond
-    COND -->|yes| J8[dast]:::parallel
-    COND -->|no| J9
-    J8 --> J9[notify<br/>if: always]:::parallel
+    COND{"ref is main or master?"}:::cond
+    J6 --> COND
+    J8["dast"]:::parallel
+    J9["notify<br/>if always"]:::parallel
+    COND -->|"yes"| J8
+    COND -->|"no"| J9
+    J8 --> J9
     J6 --> J9
 ```
 
@@ -962,31 +993,31 @@ The DevSecOps pipeline pushes container images; ArgoCD pulls manifest changes fr
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Dev as Developer
-    participant Repo as GitHub Repo<br/>(source of truth)
-    participant GHA as GitHub Actions
-    participant Reg as ECR / ACR / GCR
-    participant Argo as ArgoCD Controller
-    participant K8s as Kubernetes API
-    participant Pod as Workload Pods
+    actor Dev as "Developer"
+    participant Repo as "GitHub Repo<br/>source of truth"
+    participant GHA as "GitHub Actions"
+    participant Reg as "ECR or ACR or GCR"
+    participant Argo as "ArgoCD Controller"
+    participant K8s as "Kubernetes API"
+    participant Pod as "Workload Pods"
 
-    Dev->>Repo: git push (code + manifests)
+    Dev->>Repo: git push<br/>code + manifests
     Repo->>GHA: trigger workflow
 
-    Note over GHA: Stages 1–6 — sec scans, build, image scan
-    GHA->>Reg: docker push (tag=git.sha)
+    Note over GHA: Stages 1 to 6 — sec scans · build · image scan
+    GHA->>Reg: docker push<br/>tag=git.sha
 
-    par Pipeline-driven deploy
-        GHA->>K8s: kubectl apply (envsubst manifests)
+    par Pipeline driven deploy
+        GHA->>K8s: kubectl apply<br/>envsubst manifests
         K8s->>Pod: rolling update
         Pod-->>K8s: ready
-        GHA->>GHA: rollout status + smoke test + ZAP
-    and GitOps reconciliation (continuous)
+        GHA->>GHA: rollout status<br/>smoke test · ZAP
+    and GitOps reconciliation continuous
         loop every 3 min poll
             Argo->>Repo: git fetch HEAD
             Argo->>Argo: diff against live state
             alt drift detected
-                Argo->>K8s: apply / prune / sync
+                Argo->>K8s: apply or prune or sync
                 K8s->>Pod: reconcile
                 Pod-->>Argo: status
             else in sync
@@ -995,8 +1026,8 @@ sequenceDiagram
         end
     end
 
-    Pod-->>K8s: liveness / readiness OK
-    K8s-->>Dev: deployment healthy<br/>(visible in ArgoCD UI + Slack notify)
+    Pod-->>K8s: liveness and readiness OK
+    K8s-->>Dev: deployment healthy<br/>visible in ArgoCD UI + Slack notify
 ```
 
 ### Security Scanning Coverage Matrix
@@ -1010,35 +1041,35 @@ flowchart LR
     classDef stage fill:#FFF8E1,stroke:#F57F17,color:#E65100
 
     subgraph TOOLS["Security Tools"]
-        TH[TruffleHog]:::tool
-        GL[GitLeaks]:::tool
-        BD[Bandit]:::tool
-        SG[Semgrep]:::tool
-        PA[pip-audit]:::tool
-        TF[Trivy FS]:::tool
-        TI[Trivy Image]:::tool
-        CK[Checkov]:::tool
-        ZP[OWASP ZAP]:::tool
+        TH["TruffleHog"]:::tool
+        GL["GitLeaks"]:::tool
+        BD["Bandit"]:::tool
+        SG["Semgrep"]:::tool
+        PA["pip-audit"]:::tool
+        TF["Trivy FS"]:::tool
+        TI["Trivy Image"]:::tool
+        CK["Checkov"]:::tool
+        ZP["OWASP ZAP"]:::tool
     end
 
     subgraph STAGES["Pipeline Stages"]
-        SS[Secret Scan]:::stage
-        SAST[SAST]:::stage
-        SCA[SCA]:::stage
-        CS[Container Scan]:::stage
-        IAC[IaC Scan]:::stage
-        DAST[DAST]:::stage
+        SS["Secret Scan"]:::stage
+        SAST["SAST"]:::stage
+        SCA["SCA"]:::stage
+        CS["Container Scan"]:::stage
+        IAC["IaC Scan"]:::stage
+        DAST["DAST"]:::stage
     end
 
-    subgraph OWASP["OWASP Top 10 (2021)"]
-        A01[A01 Access Control]:::owasp
-        A02[A02 Crypto Failures]:::owasp
-        A03[A03 Injection]:::owasp
-        A05[A05 Misconfig]:::owasp
-        A06[A06 Vulnerable Deps]:::owasp
-        A07[A07 Auth Failures]:::owasp
-        A09[A09 Logging Failures]:::owasp
-        A10[A10 SSRF]:::owasp
+    subgraph OWASP["OWASP Top 10 2021"]
+        A01["A01 Access Control"]:::owasp
+        A02["A02 Crypto Failures"]:::owasp
+        A03["A03 Injection"]:::owasp
+        A05["A05 Misconfig"]:::owasp
+        A06["A06 Vulnerable Deps"]:::owasp
+        A07["A07 Auth Failures"]:::owasp
+        A09["A09 Logging Failures"]:::owasp
+        A10["A10 SSRF"]:::owasp
     end
 
     TH --> SS
