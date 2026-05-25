@@ -76,6 +76,13 @@ spec:
             - configMapRef:
                 name: fastapi-config
 
+          # ── Writable tmp dirs (root fs stays read-only) ──────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-tmp
+              mountPath: /app/tmp
+
           # ── Resource limits ──────────────────────────────────────────
           resources:
             requests:
@@ -88,7 +95,7 @@ spec:
           # ── Security Context (Container) ─────────────────────────────
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false   # uvicorn writes temp files
+            readOnlyRootFilesystem: true    # gap fix: RO rootfs + emptyDir tmp
             runAsNonRoot: true
             runAsUser: 1000
             capabilities:
@@ -130,5 +137,12 @@ spec:
           labelSelector:
             matchLabels:
               app: ${APP_NAME}
+
+      # ── emptyDir scratch space so the container root fs can be read-only ──
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-tmp
+          emptyDir: {}
 
       restartPolicy: Always

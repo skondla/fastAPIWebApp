@@ -1,0 +1,56 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Kyverno ClusterPolicy — Supply-chain integrity (gap: "No supply-chain integrity")
+#
+# Verifies that every fastapi-* image admitted to the cluster carries a valid
+# cosign *keyless* signature produced by the GitHub Actions OIDC identity, and
+# that the signature is backed by a Rekor transparency-log entry.
+#
+# Rejects any unsigned image (or one signed by an identity other than this repo's
+# release workflow). This is the runtime counterpart to the `cosign sign` step
+# added to every DevSecOps workflow.
+#
+# Requires: Kyverno >= 1.11 installed cluster-wide.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-fastapi-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify FastAPI Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Admit only fastapi-* images that are cosign-signed (keyless) by the
+      project's GitHub Actions release workflow and recorded in Rekor.
+spec:
+  validationFailureAction: Enforce        # block — not audit
+  background: false
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail
+  rules:
+    - name: verify-cosign-keyless-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces:
+                - fastapi-namespace
+                - fastapi-admin-namespace
+      verifyImages:
+        - imageReferences:
+            - "*/fastapi-user-app:*"
+            - "*/fastapi-admin-app:*"
+            - "*fastapiregistry*/*:*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    # The CI workflow signs with cosign keyless (Fulcio + Rekor).
+                    # Lock the trusted identity to this repository's workflows.
+                    subject: "https://github.com/skondla/fastAPIWebApp/.github/workflows/*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          mutateDigest: true              # pin to the verified digest
+          required: true

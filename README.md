@@ -1100,6 +1100,22 @@ flowchart LR
     DAST --> A10
 ```
 
+### Security Enforcement & Supply Chain
+
+The pipeline enforces — not just observes — security. See [SECURITY.md](SECURITY.md) for the full gap-to-remediation map.
+
+| Control | Implementation |
+|---|---|
+| **Blocking gates** | secret-scan, Bandit (high/high), Semgrep (`--error`), pip-audit, Trivy FS/image (CRITICAL → `exit-code 1`), Checkov K8s (`soft_fail: false`) all fail the build |
+| **Image signing** | `cosign sign` keyless (OIDC + Fulcio + Rekor) on every build; verified in `container-scan` and again at admission by Kyverno |
+| **SBOM** | Syft CycloneDX SBOM generated + `cosign attest`-ed to the image, uploaded as a build artifact |
+| **Runtime secrets** | [External Secrets Operator](security/external-secrets/) (AWS Secrets Manager) replaces base64 K8s Secrets; Sealed Secrets fallback |
+| **Policy-as-code** | [Kyverno ClusterPolicies](security/kyverno/) — verify signatures, restricted pod security, supply-chain hygiene |
+| **Network isolation** | [default-deny NetworkPolicies](security/network-policies/) + namespace Pod Security Standards (`restricted`) |
+| **Delivery model** | [ArgoCD Applications](argocd/applications/) make GitOps the single authority (no push/pull duality) |
+| **Runtime hardening** | non-root · seccomp · drop ALL caps · `readOnlyRootFilesystem: true` · IRSA/Workload Identity |
+| **No overlapping deploys** | per-ref `concurrency` guard on every workflow |
+
 ### Workflow Files
 
 | Workflow | App | Target Cloud | Image Registry |

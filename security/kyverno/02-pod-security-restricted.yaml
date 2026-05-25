@@ -1,0 +1,97 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Kyverno ClusterPolicy — Pod Security hardening (gap: "No policy-as-code")
+#
+# Admission-time enforcement of the runtime controls the manifests already set,
+# so a future manifest that drops a control is rejected rather than silently
+# deployed. Complements the namespace Pod Security Standards labels.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: fastapi-pod-security-restricted
+  annotations:
+    policies.kyverno.io/title: FastAPI Pod Security (Restricted)
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    # ── A05/A06 — run as non-root ───────────────────────────────────────────
+    - name: require-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Containers must run as non-root (runAsNonRoot: true)."
+        pattern:
+          spec:
+            =(securityContext):
+              =(runAsNonRoot): "true"
+            containers:
+              - =(securityContext):
+                  =(runAsNonRoot): "true"
+
+    # ── Drop ALL Linux capabilities ─────────────────────────────────────────
+    - name: require-drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Containers must drop ALL Linux capabilities."
+        foreach:
+          - list: request.object.spec.containers
+            pattern:
+              securityContext:
+                capabilities:
+                  drop: ["ALL"]
+
+    # ── No privilege escalation ─────────────────────────────────────────────
+    - name: disallow-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "allowPrivilegeEscalation must be false."
+        foreach:
+          - list: request.object.spec.containers
+            pattern:
+              securityContext:
+                allowPrivilegeEscalation: false
+
+    # ── seccomp RuntimeDefault ──────────────────────────────────────────────
+    - name: require-seccomp-runtime-default
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Pod must set seccompProfile type RuntimeDefault."
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: RuntimeDefault
+
+    # ── read-only root filesystem (gap from K8s hardening 8/10) ─────────────
+    - name: require-read-only-root-filesystem
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Containers must use a read-only root filesystem."
+        foreach:
+          - list: request.object.spec.containers
+            pattern:
+              securityContext:
+                readOnlyRootFilesystem: true

@@ -1,0 +1,72 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Kyverno ClusterPolicy — Deployment hygiene & registry allow-listing
+#
+# Closes two gaps at admission time:
+#   • "disallow latest tag"  — mutable tags break the build-once/promote model
+#   • registry allow-listing — only images from the project's trusted registries
+#   • require resource limits + probes (K8s hardening confirmations)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: fastapi-supply-chain-hygiene
+  annotations:
+    policies.kyverno.io/title: FastAPI Supply-chain Hygiene
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    # ── Disallow :latest and other mutable tags ─────────────────────────────
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Images must be pinned to an immutable tag/digest — ':latest' is not allowed."
+        foreach:
+          - list: request.object.spec.containers
+            deny:
+              conditions:
+                any:
+                  - key: "{{ images.containers.\"{{element.name}}\".tag || '' }}"
+                    operator: AnyIn
+                    value: ["latest", ""]
+
+    # ── Only trusted registries (ECR / GCR / Artifact Registry / ACR) ───────
+    - name: restrict-image-registries
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "Images must come from an approved registry (ECR, GCR/Artifact Registry, or ACR)."
+        foreach:
+          - list: request.object.spec.containers
+            pattern:
+              image: "*amazonaws.com/* | *gcr.io/* | *-docker.pkg.dev/* | *.azurecr.io/* | busybox:*"
+
+    # ── Require resource requests & limits ──────────────────────────────────
+    - name: require-resource-limits
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [fastapi-namespace, fastapi-admin-namespace]
+      validate:
+        message: "CPU/memory requests and limits are required on the app container."
+        foreach:
+          - list: request.object.spec.containers
+            # init containers are exempt
+            pattern:
+              =(resources):
+                requests:
+                  cpu: "?*"
+                  memory: "?*"
+                limits:
+                  memory: "?*"

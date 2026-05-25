@@ -53,11 +53,17 @@ spec:
           envFrom:
             - secretRef: { name: fastapi-db-secret }
             - configMapRef: { name: fastapi-config }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-tmp
+              mountPath: /app/tmp
           resources:
             requests: { cpu: "250m", memory: "256Mi" }
             limits:   { cpu: "1000m", memory: "512Mi" }
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true    # gap fix: RO rootfs + emptyDir tmp
             runAsNonRoot: true
             runAsUser: 1000
             capabilities: { drop: ["ALL"] }
@@ -69,3 +75,8 @@ spec:
             httpGet: { path: /, port: 50443, scheme: HTTPS }
             initialDelaySeconds: 30
             periodSeconds: 30
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-tmp
+          emptyDir: {}

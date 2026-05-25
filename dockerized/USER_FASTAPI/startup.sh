@@ -23,6 +23,12 @@ echo "Starting FastAPI DB Restore Tool on https://${HOST_IP}:50443"
 echo "  DB host:     ${shost}:${sport}/${sdatabase}"
 echo "  Swagger UI:  https://${HOST_IP}:50443/api/docs"
 
+# Log to a writable mount so the container root filesystem can stay read-only.
+# Kubernetes captures stdout regardless; the file copy goes to the emptyDir at
+# /app/tmp (see deployment volumeMounts). Falls back to stdout-only if unset.
+LOG_DIR="${LOG_DIR:-/app/tmp}"
+mkdir -p "${LOG_DIR}" 2>/dev/null || true
+
 exec uvicorn main:app \
     --host "${HOST_IP}" \
     --port 50443 \
@@ -30,4 +36,4 @@ exec uvicorn main:app \
     --ssl-keyfile  "${SSL_KEY}" \
     --workers 2 \
     --log-level info \
-    2>&1 | tee /app/fastapi_user.log
+    2>&1 | tee "${LOG_DIR}/fastapi_user.log"

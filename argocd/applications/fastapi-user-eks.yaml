@@ -1,0 +1,43 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ArgoCD Application — USER app on EKS
+# Closes gap: "Push / pull duality — pipeline runs `kubectl apply` while ArgoCD
+# also reconciles the same manifests."
+#
+# Resolution: ArgoCD is the SINGLE delivery authority. The CI pipeline no longer
+# runs `kubectl apply`; it builds, scans, signs, and pushes the image, then bumps
+# the image tag in Git. ArgoCD detects the change and reconciles — one writer,
+# drift self-corrects, rollback is a Git revert.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-user-eks
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/skondla/fastAPIWebApp.git
+    targetRevision: main
+    path: aws/eks/deploy/manifest/fastapi1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fastapi-namespace
+  syncPolicy:
+    automated:
+      prune: true            # delete resources removed from Git
+      selfHeal: true         # revert out-of-band kubectl changes (kills drift)
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=false
+      - ApplyOutOfSyncOnly=true
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
