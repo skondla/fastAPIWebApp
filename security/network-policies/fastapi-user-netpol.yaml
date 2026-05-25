@@ -1,0 +1,63 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# NetworkPolicy — fastapi-namespace (USER app)
+# Closes K8s-hardening gap: "NetworkPolicy / Pod Security — not evidenced"
+#
+# Model: default-deny everything, then allow only the flows the app needs.
+# Requires a CNI that enforces NetworkPolicy (Calico/Cilium on EKS/GKE; Azure
+# NPM/Cilium on AKS). Calico/canal manifests already live under
+# */deploy/manifests/postgres/sample2/.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: fastapi-namespace
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: fastapi-namespace
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-ingress-and-egress
+  namespace: fastapi-namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: fastapi-user-app
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Inbound HTTPS from the load balancer / anywhere on the app port only.
+    - ports:
+        - protocol: TCP
+          port: 50443
+  egress:
+    # PostgreSQL
+    - ports:
+        - protocol: TCP
+          port: 5432
+    # Outbound HTTPS to AWS APIs (RDS/SES/Secrets Manager), Slack, Rekor, etc.
+    - ports:
+        - protocol: TCP
+          port: 443

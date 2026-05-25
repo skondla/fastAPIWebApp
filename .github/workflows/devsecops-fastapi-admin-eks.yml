@@ -33,7 +33,13 @@ env:
 permissions:
   contents: read
   security-events: write
-  id-token: write
+  id-token: write           # OIDC for AWS auth + cosign keyless signing
+  packages: write           # push cosign signature + SBOM attestation
+
+# Gap fix — serialize runs per ref; no overlapping deploys.
+concurrency:
+  group: devsecops-admin-eks-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 # ════════════════════════════════════════════════════════════════════════════
@@ -107,10 +113,29 @@ jobs:
 
       - name: Upload SAST artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sast-reports-admin
           path: "*.sarif"
           retention-days: 30
+
+      # ── GATE — fail on high-confidence/high-severity findings ─────────────
+      - name: Bandit gate (HIGH severity + HIGH confidence)
+        run: |
+          bandit -r dockerized/ADMIN_FASTAPI/ \
+            --configfile dockerized/ADMIN_FASTAPI/.bandit \
+            --severity-level high \
+            --confidence-level high
+
+      - name: Semgrep gate (ERROR severity blocks)
+        run: |
+          semgrep \
+            --config p/owasp-top-ten \
+            --config p/jwt \
+            --config p/secrets \
+            --error \
+            --severity ERROR \
+            dockerized/ADMIN_FASTAPI/
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. SCA
@@ -128,7 +153,8 @@ jobs:
       - name: Install SCA tools
         run: pip install pip-audit
 
-      - name: pip-audit — dependency vulnerability scan
+      # ── Visibility — full SARIF (HIGH+CRITICAL), never fails ──────────────
+      - name: pip-audit — dependency vulnerability scan (report)
         run: |
           pip-audit \
             -r dockerized/ADMIN_FASTAPI/requirements.txt \
@@ -137,11 +163,12 @@ jobs:
 
       - name: Upload pip-audit SARIF
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: pip-audit-results.sarif
           category: pip-audit
 
-      - name: Trivy — filesystem SCA scan
+      - name: Trivy — filesystem SCA scan (report)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -153,19 +180,35 @@ jobs:
 
       - name: Upload Trivy FS SARIF
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: trivy-fs-results.sarif
           category: trivy-fs
+
+      # ── GATE — block on CRITICAL dependency vulnerabilities ───────────────
+      - name: pip-audit gate (fail on any known vuln)
+        run: pip-audit -r dockerized/ADMIN_FASTAPI/requirements.txt
+
+      - name: Trivy FS gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: dockerized/ADMIN_FASTAPI/
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. BUILD & PUSH — Docker image to ECR
 # ════════════════════════════════════════════════════════════════════════════
   build:
-    name: "🐳 Build & Push to ECR"
+    name: "🐳 Build, Push, Sign & SBOM"
     runs-on: ubuntu-latest
     needs: [secret-scan, sast, sca]
     outputs:
       image: ${{ steps.build-image.outputs.image }}
+      digest: ${{ steps.build-image.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -193,7 +236,43 @@ jobs:
             -t "$IMAGE" -t "$IMAGE_LATEST" .
           docker push "$IMAGE"
           docker push "$IMAGE_LATEST"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d'@' -f2)
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_digest=${ECR_REGISTRY}/${ECR_REPOSITORY}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # ── Supply-chain integrity — sign + SBOM + attest ─────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install Syft (SBOM generator)
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Sign image (cosign keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: cosign sign --yes "${{ steps.build-image.outputs.image_digest }}"
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          syft "${{ steps.build-image.outputs.image_digest }}" \
+            -o cyclonedx-json=sbom.cdx.json
+
+      - name: Attest SBOM to the image
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cdx.json \
+            --type cyclonedx \
+            "${{ steps.build-image.outputs.image_digest }}"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-admin-eks
+          path: sbom.cdx.json
+          retention-days: 90
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5. CONTAINER SCAN
@@ -203,7 +282,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Run Trivy image vulnerability scanner
+      - name: Trivy image scan (report — HIGH+CRITICAL → SARIF)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ needs.build.outputs.image }}
@@ -214,9 +293,33 @@ jobs:
 
       - name: Upload Trivy image SARIF
         uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with:
           sarif_file: trivy-image-results.sarif
           category: trivy-image
+
+      # ── GATE — block on CRITICAL image vulnerabilities ────────────────────
+      - name: Trivy image gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # ── Verify cosign signature produced at build ─────────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify cosign signature (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/skondla/fastAPIWebApp/.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${{ needs.build.outputs.image }}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6. IaC SCAN — Terraform security (Checkov)
@@ -227,7 +330,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkov — Terraform + K8s security scan
+      - name: Checkov — Terraform security scan (report)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: aws/eks/deploy/terraform-fastapi
@@ -236,20 +339,20 @@ jobs:
           output_file_path: checkov-results.sarif
           soft_fail: true
 
-      - name: Checkov — Kubernetes manifests scan
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+          category: checkov-terraform
+
+      # ── GATE — hard-fail on Kubernetes manifest misconfigurations ─────────
+      - name: Checkov — Kubernetes manifests gate (hard-fail)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: aws/eks/deploy/manifest/fastapi-admin
           framework: kubernetes
-          output_format: sarif
-          output_file_path: checkov-k8s-results.sarif
-          soft_fail: true
-
-      - name: Upload Checkov SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: checkov-results.sarif
-          category: checkov-terraform
+          soft_fail: false
 
 # ════════════════════════════════════════════════════════════════════════════
 # 7. DEPLOY — Apply manifests to EKS
@@ -281,9 +384,10 @@ jobs:
         run: |
           export FASTAPI_IMAGE EKS_NAMESPACE APP_NAME APP_PORT
 
+          # NOTE: secret.yaml is intentionally NOT applied here — the Secret is
+          # provided by the External Secrets Operator (security/external-secrets/).
           for manifest in \
             aws/eks/deploy/manifest/fastapi-admin/namespace.yaml \
-            aws/eks/deploy/manifest/fastapi-admin/secret.yaml \
             aws/eks/deploy/manifest/fastapi-admin/configmap.yaml \
             aws/eks/deploy/manifest/fastapi-admin/deployment.yaml \
             aws/eks/deploy/manifest/fastapi-admin/service.yaml \
@@ -315,6 +419,19 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
+
+      # Gap fix: DAST credential gap — re-auth via OIDC + refresh kubeconfig.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.EKS_CLUSTER }} \
+            --region ${{ env.AWS_REGION }}
 
       - name: Resolve load balancer hostname
         id: lb

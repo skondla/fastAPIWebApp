@@ -27,7 +27,12 @@ env:
 permissions:
   contents: read
   security-events: write
-  id-token: write
+  id-token: write           # OIDC for GCP auth + cosign keyless signing
+  packages: write
+
+concurrency:
+  group: devsecops-user-gke-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 # ════════════════════════════════════════════════════════════════════════════
@@ -78,7 +83,19 @@ jobs:
             dockerized/USER_FASTAPI/ \
             --sarif --output semgrep-results.sarif || true
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: semgrep-results.sarif, category: semgrep }
+
+      # ── GATE — fail on high-confidence/high-severity findings ─────────────
+      - name: Bandit gate (HIGH severity + HIGH confidence)
+        run: |
+          bandit -r dockerized/USER_FASTAPI/ \
+            --configfile dockerized/USER_FASTAPI/.bandit \
+            --severity-level high --confidence-level high
+      - name: Semgrep gate (ERROR severity blocks)
+        run: |
+          semgrep --config p/owasp-top-ten --config p/jwt --config p/secrets \
+            --error --severity ERROR dockerized/USER_FASTAPI/
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. SCA
@@ -98,7 +115,7 @@ jobs:
             --format sarif --output pip-audit-results.sarif || true
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: pip-audit-results.sarif, category: pip-audit }
-      - name: Trivy FS
+      - name: Trivy FS (report)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -108,7 +125,21 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "0"
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: trivy-fs-results.sarif, category: trivy-fs }
+
+      # ── GATE — block on CRITICAL dependency vulnerabilities ───────────────
+      - name: pip-audit gate (fail on any known vuln)
+        run: pip-audit -r dockerized/USER_FASTAPI/requirements.txt
+      - name: Trivy FS gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: dockerized/USER_FASTAPI/
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. BUILD & PUSH — Google Artifact Registry
@@ -139,12 +170,31 @@ jobs:
         working-directory: dockerized/USER_FASTAPI
         run: |
           IMAGE="${GKE_REGION}-docker.pkg.dev/${GKE_PROJECT}/${GKE_PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+          REPO="${GKE_REGION}-docker.pkg.dev/${GKE_PROJECT}/${GKE_PROJECT}/${APP_NAME}"
           docker build \
             --label "git.commit=${GITHUB_SHA}" \
             --label "build.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t "$IMAGE" .
           docker push "$IMAGE"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d'@' -f2)
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "image_digest=${REPO}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # ── Supply-chain integrity — sign + SBOM + attest ─────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+      - name: Sign image (cosign keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: cosign sign --yes "${{ steps.build-image.outputs.image_digest }}"
+      - name: Generate SBOM (CycloneDX)
+        run: syft "${{ steps.build-image.outputs.image_digest }}" -o cyclonedx-json=sbom.cdx.json
+      - name: Attest SBOM
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: cosign attest --yes --predicate sbom.cdx.json --type cyclonedx "${{ steps.build-image.outputs.image_digest }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-user-gke, path: sbom.cdx.json, retention-days: 90 }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5. CONTAINER SCAN
@@ -154,7 +204,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Trivy image scan
+      - name: Trivy image scan (report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ needs.build.outputs.image }}
@@ -163,7 +213,26 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "0"
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: trivy-image-results.sarif, category: trivy-image }
+      # ── GATE — block on CRITICAL image vulnerabilities ────────────────────
+      - name: Trivy image gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Verify cosign signature (keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/skondla/fastAPIWebApp/.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${{ needs.build.outputs.image }}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6. IaC SCAN (Checkov)
@@ -178,11 +247,12 @@ jobs:
           directory: gcp/gke/deploy/terraform-fastapi
           framework: terraform
           soft_fail: true
+      # ── GATE — hard-fail on K8s manifest misconfigurations ────────────────
       - uses: bridgecrewio/checkov-action@master
         with:
           directory: gcp/gke/deploy/manifests/fastapi1
           framework: kubernetes
-          soft_fail: true
+          soft_fail: false
 
 # ════════════════════════════════════════════════════════════════════════════
 # 7. DEPLOY — GKE
@@ -212,9 +282,10 @@ jobs:
           FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           export FASTAPI_IMAGE GKE_NAMESPACE APP_NAME APP_PORT GKE_SA
+          # NOTE: secret.yaml is intentionally NOT applied — the Secret is
+          # provided by the External Secrets Operator (security/external-secrets/).
           for manifest in \
             gcp/gke/deploy/manifests/fastapi1/namespace.yaml \
-            gcp/gke/deploy/manifests/fastapi1/secret.yaml \
             gcp/gke/deploy/manifests/fastapi1/configmap.yaml \
             gcp/gke/deploy/manifests/fastapi1/deployment.yaml \
             gcp/gke/deploy/manifests/fastapi1/service.yaml \
@@ -241,6 +312,17 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
+      # Gap fix: DAST credential gap — re-auth to GCP + refresh GKE credentials.
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location:     ${{ env.GKE_ZONE }}
       - name: Get LB IP
         id: svc
         run: |

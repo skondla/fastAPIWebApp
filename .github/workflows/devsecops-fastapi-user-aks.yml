@@ -25,7 +25,12 @@ env:
 permissions:
   contents: read
   security-events: write
-  id-token: write
+  id-token: write           # OIDC for Azure auth + cosign keyless signing
+  packages: write
+
+concurrency:
+  group: devsecops-user-aks-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 # ════════════════════════════════════════════════════════════════════════════
@@ -83,7 +88,19 @@ jobs:
             --sarif --output semgrep-results.sarif || true
 
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: semgrep-results.sarif, category: semgrep }
+
+      # ── GATE — fail on high-confidence/high-severity findings ─────────────
+      - name: Bandit gate (HIGH severity + HIGH confidence)
+        run: |
+          bandit -r dockerized/USER_FASTAPI/ \
+            --configfile dockerized/USER_FASTAPI/.bandit \
+            --severity-level high --confidence-level high
+      - name: Semgrep gate (ERROR severity blocks)
+        run: |
+          semgrep --config p/owasp-top-ten --config p/jwt --config p/secrets \
+            --error --severity ERROR dockerized/USER_FASTAPI/
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. SCA
@@ -105,7 +122,7 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: pip-audit-results.sarif, category: pip-audit }
 
-      - name: Trivy FS scan
+      - name: Trivy FS scan (report)
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -115,7 +132,21 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "0"
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: trivy-fs-results.sarif, category: trivy-fs }
+
+      # ── GATE — block on CRITICAL dependency vulnerabilities ───────────────
+      - name: pip-audit gate (fail on any known vuln)
+        run: pip-audit -r dockerized/USER_FASTAPI/requirements.txt
+      - name: Trivy FS gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: dockerized/USER_FASTAPI/
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. BUILD & PUSH — Azure Container Registry
@@ -144,9 +175,28 @@ jobs:
         working-directory: dockerized/USER_FASTAPI
         run: |
           IMAGE="${ACR_NAME}.azurecr.io/${APP_NAME}:${IMAGE_TAG}"
+          REPO="${ACR_NAME}.azurecr.io/${APP_NAME}"
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" | cut -d'@' -f2)
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "image_digest=${REPO}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # ── Supply-chain integrity — sign + SBOM + attest ─────────────────────
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+      - name: Sign image (cosign keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: cosign sign --yes "${{ steps.build-image.outputs.image_digest }}"
+      - name: Generate SBOM (CycloneDX)
+        run: syft "${{ steps.build-image.outputs.image_digest }}" -o cyclonedx-json=sbom.cdx.json
+      - name: Attest SBOM
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: cosign attest --yes --predicate sbom.cdx.json --type cyclonedx "${{ steps.build-image.outputs.image_digest }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-user-aks, path: sbom.cdx.json, retention-days: 90 }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5. CONTAINER SCAN
@@ -156,7 +206,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Trivy image scan
+      - name: Trivy image scan (report)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ needs.build.outputs.image }}
@@ -165,7 +215,26 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "0"
       - uses: github/codeql-action/upload-sarif@v3
+        if: always()
         with: { sarif_file: trivy-image-results.sarif, category: trivy-image }
+      # ── GATE — block on CRITICAL image vulnerabilities ────────────────────
+      - name: Trivy image gate (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image }}
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Verify cosign signature (keyless)
+        env: { COSIGN_EXPERIMENTAL: "1" }
+        run: |
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/skondla/fastAPIWebApp/.github/workflows/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${{ needs.build.outputs.image }}"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6. IaC SCAN (Checkov)
@@ -183,12 +252,13 @@ jobs:
           framework: terraform
           soft_fail: true
 
-      - name: Checkov — K8s manifests
+      # ── GATE — hard-fail on K8s manifest misconfigurations ────────────────
+      - name: Checkov — K8s manifests (hard-fail)
         uses: bridgecrewio/checkov-action@master
         with:
           directory: azure/aks/deploy/manifest/fastapi1
           framework: kubernetes
-          soft_fail: true
+          soft_fail: false
 
 # ════════════════════════════════════════════════════════════════════════════
 # 7. DEPLOY — AKS
@@ -219,9 +289,10 @@ jobs:
           FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
         run: |
           export FASTAPI_IMAGE AKS_NAMESPACE APP_NAME APP_PORT
+          # NOTE: secret.yaml is intentionally NOT applied — the Secret is
+          # provided by the External Secrets Operator (security/external-secrets/).
           for manifest in \
             azure/aks/deploy/manifest/fastapi1/namespace.yaml \
-            azure/aks/deploy/manifest/fastapi1/secret.yaml \
             azure/aks/deploy/manifest/fastapi1/configmap.yaml \
             azure/aks/deploy/manifest/fastapi1/deployment.yaml \
             azure/aks/deploy/manifest/fastapi1/service.yaml \
@@ -240,6 +311,19 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
+
+      # Gap fix: DAST credential gap — re-auth to Azure + refresh AKS context.
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Get AKS credentials
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          cluster-name:   ${{ env.AKS_CLUSTER }}
 
       - name: Get service IP
         id: svc
