@@ -11,6 +11,7 @@ Configure these in **Settings → Secrets and variables → Actions** of your Gi
 | `JWT_SECRET_KEY` | JWT signing key — must be long, random, unique per environment | `openssl rand -hex 32` |
 | `SLACK_WEBHOOK_URL` | Slack incoming-webhook URL for deploy notifications | `https://hooks.slack.com/services/T.../B.../...` |
 | `DB_PASSWORD` | PostgreSQL password injected into the K8s Secret manifest | — |
+| `ANTHROPIC_API_KEY` | Claude API key for the AI Security Triage agent (`ai-triage` job). Optional — the advisory job skips cleanly if unset. | `sk-ant-...` |
 
 ---
 
