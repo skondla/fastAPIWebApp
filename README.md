@@ -42,6 +42,7 @@ A multi-cloud, containerized web application and REST API for managing AWS RDS d
 - [Getting Started](#getting-started)
 - [Usage — cURL Examples](#usage--curl-examples)
 - [Screenshots](#screenshots)
+- [Agentic AI Transformation](#agentic-ai-transformation)
 - [Contact](#contact)
 
 ---
@@ -1287,6 +1288,32 @@ AttachDB page 2:
 DB Restore Options after login:
 
 ![Alt text](images/db_restore_options_after_login.png)
+
+---
+
+## Agentic AI Transformation
+
+This repository was independently rated **3.4 / 5 overall** (DevSecOps 3.0 ·
+Infrastructure 3.7 · Pipeline Automation 3.5) — strong engineering craft held one
+level below its potential by *automation that observed but did not enforce*. The
+[security hardening branch](SECURITY.md) closed the enforcement, supply-chain,
+secrets, and runtime gaps by hand; the next step is keeping them closed at scale
+with autonomous agents.
+
+See the full report — quality scorecard, agent-augmented target architecture, the
+six agents to deploy, a phased autonomy roadmap, projected impact, and guardrails:
+
+➡️ **[docs/AGENTIC_AI_TRANSFORMATION.md](docs/AGENTIC_AI_TRANSFORMATION.md)**
+
+| Phase | Horizon | What agents do |
+|---|---|---|
+| **Assistive** | 0–2 months | Copilots + triage agent ranks findings; humans act |
+| **Supervised** | 2–5 months | Agents open fix-PRs, self-heal CI; humans approve every merge |
+| **Autonomous + guardrails** | 5–10 months | Low-risk fixes auto-merge under policy; humans set policy + handle exceptions |
+
+Every agent runs behind human-in-the-loop approval, least-privilege identity, a
+full audit trail, and a policy rule that **agents may never weaken a security
+control** (enforced by the [Kyverno policies](security/kyverno/)).
 
 ---
 
