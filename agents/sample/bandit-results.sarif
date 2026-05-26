@@ -1,0 +1,35 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Bandit",
+          "rules": [
+            { "id": "B105", "defaultConfiguration": { "level": "warning" } },
+            { "id": "B113", "defaultConfiguration": { "level": "warning" } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B105",
+          "level": "warning",
+          "message": { "text": "Possible hardcoded password: default SECRET_KEY fallback string." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "dockerized/USER_FASTAPI/security.py" }, "region": { "startLine": 22 } } }
+          ]
+        },
+        {
+          "ruleId": "B113",
+          "level": "warning",
+          "message": { "text": "Requests call without timeout in Slack webhook helper." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "dockerized/USER_FASTAPI/routers/main_router.py" }, "region": { "startLine": 78 } } }
+          ]
+        }
+      ]
+    }
+  ]
+}

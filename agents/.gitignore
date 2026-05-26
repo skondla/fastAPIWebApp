@@ -1,0 +1,4 @@
+# Agent audit trail (runtime artifact)
+.audit/
+__pycache__/
+*.pyc
