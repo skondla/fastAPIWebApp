@@ -1,0 +1,19 @@
+# tfsec configuration for the multi-cloud network IaC.
+# https://aquasecurity.github.io/tfsec
+---
+exclude:
+  # Default SG locked-down on purpose; tfsec flags any default SG presence.
+  - aws-vpc-no-default-vpc
+
+severity_overrides:
+  aws-ec2-no-public-ingress-sgr: ERROR
+  aws-vpc-add-description-to-security-group-rule: WARNING
+  azure-network-no-public-ingress: ERROR
+  google-compute-no-public-ingress: ERROR
+  aws-ec2-require-vpc-flow-logs-for-all-vpcs: ERROR
+  aws-cloudwatch-log-group-customer-key: ERROR
+
+minimum_severity: WARNING
+
+# Treat warnings as failures in CI.
+soft_fail: false

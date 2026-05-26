@@ -1,0 +1,30 @@
+# ────────────────────────────────────────────────────────────────────
+# cross-cloud/terraform.tfvars  —  copy to terraform.tfvars and fill in
+# from the AWS / Azure / GCP env stack outputs (or wire remote_state).
+# ────────────────────────────────────────────────────────────────────
+
+project = "fastapi"
+
+# ─── AWS ─────────────────────────────────────────────────────────────
+aws_region                          = "us-east-1"
+aws_transit_gateway_id              = "tgw-0000000000000abcd"
+aws_transit_gateway_route_table_id  = "tgw-rtb-0000000000000abcd"
+aws_side_asn                        = 64512
+aws_address_space                   = ["10.10.0.0/16", "10.20.0.0/16"]
+
+# ─── Azure ───────────────────────────────────────────────────────────
+azure_location                = "eastus2"
+azure_resource_group_name     = "fastapi-hub-rg"
+azure_vpn_gateway_id          = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/fastapi-hub-rg/providers/Microsoft.Network/virtualNetworkGateways/fastapi-hub-vpngw"
+azure_vpn_gateway_public_ips  = ["20.10.10.10", "20.10.10.11"]
+azure_vpn_gateway_asn         = 65515
+azure_address_space           = ["10.40.0.0/16", "10.50.0.0/16"]
+
+# ─── GCP ─────────────────────────────────────────────────────────────
+gcp_project_id        = "fastapi-prod"
+gcp_region            = "us-east4"
+gcp_network_self_link = "projects/fastapi-prod/global/networks/fastapi-hub-vpc"
+gcp_ha_vpn_gateway_id = "projects/fastapi-prod/regions/us-east4/vpnGateways/fastapi-hub-ha-vpn"
+gcp_router_name       = "fastapi-hub-router"
+gcp_router_asn        = 65530
+gcp_address_space     = ["10.70.0.0/16", "10.80.0.0/16"]

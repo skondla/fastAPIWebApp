@@ -1,0 +1,39 @@
+# Checkov configuration — runs over provisioning/terraform/.
+# https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+---
+framework:
+  - terraform
+  - terraform_plan
+
+directory:
+  - provisioning/terraform
+
+# Severities to fail the build on.
+soft-fail: false
+hard-fail-on:
+  - CRITICAL
+  - HIGH
+
+# Run only network/security-relevant checks.
+check:
+  - CKV_AWS_*          # all AWS
+  - CKV_AZURE_*        # all Azure
+  - CKV_GCP_*          # all GCP
+  - CKV2_AWS_*
+  - CKV2_AZURE_*
+  - CKV2_GCP_*
+
+# Skip checks we know don't apply or that we've replaced with custom OPA.
+skip-check:
+  - CKV_AWS_111   # access analyzer enabled (org-level, lives elsewhere)
+  - CKV_AWS_338   # cloudwatch retention >= 1y — we enforce 90d/365d via OPA
+
+# Output JUnit XML for CI test reporting.
+output:
+  - cli
+  - junitxml
+output-file-path: .checkov.junit.xml
+
+# Custom checks layered on top.
+external-checks-dir:
+  - provisioning/terraform/_global/guardrails/checkov/custom

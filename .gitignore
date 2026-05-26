@@ -3,3 +3,4 @@
 .log
 .__pyc
 .DStore
+.terraform

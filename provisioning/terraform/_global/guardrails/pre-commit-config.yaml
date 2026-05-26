@@ -1,0 +1,49 @@
+# Symlink or merge into /.pre-commit-config.yaml at the repo root.
+# `pre-commit install` activates the hooks.
+
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.88.4
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+        args:
+          - --tf-init-args=-backend=false
+      - id: terraform_docs
+        args:
+          - --hook-config=--path-to-file=README.md
+          - --hook-config=--add-to-existing-file=true
+          - --args=--config=.terraform-docs.yml
+      - id: terraform_tflint
+        args:
+          - --args=--minimum-failure-severity=warning
+      - id: terraform_tfsec
+        args:
+          - --args=--config-file=provisioning/terraform/_global/guardrails/tfsec/.tfsec/config.yml
+      - id: terraform_checkov
+        args:
+          - --args=--config-file=provisioning/terraform/_global/guardrails/checkov/.checkov.yaml
+
+  - repo: https://github.com/instrumenta/conftest
+    rev: v0.49.1
+    hooks:
+      - id: conftest-test
+        args:
+          - --policy=provisioning/terraform/_global/guardrails/conftest/policy
+        files: \.plan\.json$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-json
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
