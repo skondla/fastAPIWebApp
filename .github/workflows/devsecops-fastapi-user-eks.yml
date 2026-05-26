@@ -189,6 +189,15 @@ jobs:
           sarif_file: trivy-fs-results.sarif
           category: trivy-fs
 
+      # Publish SARIF as a downloadable artifact so the AI triage agent can read it.
+      - name: Upload SCA SARIF artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-reports
+          path: "*.sarif"
+          retention-days: 7
+
       # ── GATE — block on CRITICAL dependency vulnerabilities ───────────────
       # Gap fix: "Non-blocking security gates" (was exit-code 0 / `|| true`).
       - name: pip-audit gate (fail on any known vuln)
@@ -360,6 +369,62 @@ jobs:
           directory: aws/eks/deploy/manifest/fastapi1
           framework: kubernetes
           soft_fail: false
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6b. AI SECURITY TRIAGE — Agentic AI, advisory / non-blocking (Phase 1)
+#     Claude-powered triage of the SAST + SCA SARIF: dedup, rank, recommend.
+#     Never fails the build (continue-on-error). Skips cleanly without the key.
+#     See agents/ and docs/AGENTIC_AI_TRANSFORMATION.md.
+# ════════════════════════════════════════════════════════════════════════════
+  ai-triage:
+    name: "🤖 AI Security Triage (advisory)"
+    runs-on: ubuntu-latest
+    needs: [sast, sca]
+    if: always()
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download scanner SARIF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: triage-sarif
+        continue-on-error: true
+
+      - name: Install agent dependencies
+        run: pip install -r agents/requirements.txt
+
+      - name: Run Security Triage Agent (advisory)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY not set — skipping AI triage (advisory step)." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Advisory only: no --fail-on-block, so this never gates the build.
+          python -m agents.orchestrator triage-sarif | tee triage-report.txt
+          {
+            echo "## 🤖 AI Security Triage (advisory)"
+            echo '```'
+            cat triage-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload triage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-triage-report
+          path: triage-report.txt
+          retention-days: 30
 
 # ════════════════════════════════════════════════════════════════════════════
 # 7. DEPLOY — Apply manifests to EKS
