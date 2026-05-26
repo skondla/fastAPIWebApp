@@ -30,3 +30,4 @@ override.tf.json
 
 # Plan output files
 *.tfplan
+**/.terraform/*
