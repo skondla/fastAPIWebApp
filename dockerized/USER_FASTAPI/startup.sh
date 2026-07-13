@@ -13,6 +13,10 @@ export sdatabase="${sdatabase:-flaskapp}"
 # JWT secret — MUST be changed in production
 export SECRET_KEY="${SECRET_KEY:-s3dgMHEPR47DlmXNmb9hvHfj99U53beO-CHANGE-IN-PRODUCTION}"
 
+# Agent orchestration (restore workflow) — required for /agent/restore-workflow
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+export ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-sonnet-5}"
+
 # ── Derive host IP (same pattern as original Flask startup) ───────────────────
 HOST_IP=$(hostname -i 2>/dev/null || echo "0.0.0.0")
 

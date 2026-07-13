@@ -6,11 +6,8 @@
 # -*- coding: utf-8 -*-
 
 import datetime
-import json
-import os
 from typing import Optional
 
-import requests as http_requests
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -18,9 +15,10 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 import models
+import rds_ops
 import security
+from agent_orchestrator import RestoreOrchestrator
 from database import get_db
-from rdsAdmin import RDSCreate, RDSDescribe, RDSRestore
 
 router = APIRouter(tags=["web-ui"])
 templates = Jinja2Templates(directory="templates")
@@ -57,83 +55,6 @@ def _log_user_action(
     )
     db.add(info)
     db.commit()
-
-
-def _slack_post(snapshot_name: str, new_endpoint: str, db_state: str, action: str, username: str):
-    webhook_url = os.environ.get(
-        "SLACK_WEBHOOK_URL",
-        "https://hooks.slack.com/services/XXXX/XXXX/xyyyybbbbssssrm01",
-    )
-    today = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    payload = {
-        "channel": "@skondla",
-        "username": username,
-        "text": (
-            f"{today}: {action} Database: {snapshot_name} is {db_state} "
-            f"for dB Endpoint: {new_endpoint}"
-        ),
-        "icon_emoji": ":man-biking:",
-    }
-    try:
-        resp = http_requests.post(
-            webhook_url,
-            data=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            print(f"Slack error {resp.status_code}: {resp.text}")
-    except Exception as exc:
-        print(f"Slack post failed: {exc}")
-
-
-def _send_email(snapshot_name: str, endpoint: str, db_state: str):
-    try:
-        distro_file = "/app/email_distro"
-        with open(distro_file) as f:
-            email_distro = f.read().strip()
-        os.system(
-            f"echo 'dB: {snapshot_name} is {db_state} for dB: {endpoint}'"
-            f" | mailx -s 'dB Restore' {email_distro}"
-        )
-    except Exception as exc:
-        print(f"Email send failed: {exc}")
-
-
-def _db_status(endpoint: str, new_endpoint: str) -> str:
-    if "cluster" in endpoint:
-        return RDSDescribe().getDBClusterStatus(new_endpoint)
-    return RDSDescribe().getDBInstanceStatus(new_endpoint)
-
-
-def _db_restore(snapshot_name: str, db_url: str) -> None:
-    info = RDSDescribe().dbInstanceInfo(db_url)
-    security_group = str(info[0])
-    subnet = str(info[1])
-    engine = str(info[2])
-    engine_version = str(info[4])
-    if "cluster" in db_url:
-        RDSRestore().restore_db_cluster_from_snapshot(
-            snapshot_name, snapshot_name, subnet, security_group, engine, engine_version
-        )
-    else:
-        instance_class = str(info[5])
-        RDSRestore().restore_db_instance_from_db_snapshot(
-            snapshot_name, snapshot_name, subnet, security_group, engine, instance_class
-        )
-
-
-def _db_attach(db_url: str, instance_class: str) -> str:
-    today = datetime.datetime.now().strftime("%m%d-%H%M")
-    cluster_name = db_url.split(".")[0]
-    instance_name = f"{cluster_name}-{today}"
-    info = RDSDescribe().dbInstanceInfo(db_url)
-    engine = str(info[2])
-    engine_version = str(info[4])
-    RDSCreate().create_db_cluster_instance(
-        instance_name, cluster_name, engine, engine_version, instance_class
-    )
-    return instance_name
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -186,19 +107,19 @@ async def restore_post(
     new_endpoint = snapshot_name + "." + endpoint.split(".", 1)[1]
 
     try:
-        _db_restore(snapshot_name, endpoint)
+        rds_ops.db_restore(snapshot_name, endpoint)
     except ClientError as exc:
         return PlainTextResponse(f"Restore error: {exc}", status_code=500)
 
     try:
-        db_state = _db_status(endpoint, snapshot_name)
+        db_state = rds_ops.db_status(endpoint, snapshot_name)
     except ClientError as exc:
         return PlainTextResponse(f"Status error: {exc}", status_code=500)
 
     ip = _get_client_ip(request)
     _log_user_action(db, current_user.email, ip, "DB Restore", new_endpoint, snapshot_name)
-    _slack_post(snapshot_name, new_endpoint, db_state, "Restoring", "dbRestore")
-    _send_email(snapshot_name, endpoint, db_state)
+    rds_ops.slack_post(snapshot_name, new_endpoint, db_state, "Restoring", "dbRestore")
+    rds_ops.send_email(snapshot_name, endpoint, db_state)
 
     return PlainTextResponse(
         f"Database: {snapshot_name} is being restored. "
@@ -241,14 +162,14 @@ async def status_post(
     endpoint = endpoint.strip()
 
     try:
-        db_state = _db_status(endpoint, snapshot_name)
+        db_state = rds_ops.db_status(endpoint, snapshot_name)
     except ClientError as exc:
         return PlainTextResponse(f"Status error: {exc}", status_code=500)
 
     ip = _get_client_ip(request)
     _log_user_action(db, current_user.email, ip, "DB Status", endpoint, snapshot_name)
-    _slack_post(snapshot_name, endpoint, db_state, "Status of", "dbStatus")
-    _send_email(snapshot_name, endpoint, db_state)
+    rds_ops.slack_post(snapshot_name, endpoint, db_state, "Status of", "dbStatus")
+    rds_ops.send_email(snapshot_name, endpoint, db_state)
 
     return PlainTextResponse(
         f"Database: {snapshot_name} status: {db_state}",
@@ -295,7 +216,7 @@ async def attachdb_post(
         )
 
     try:
-        instance_name = _db_attach(endpoint, instance_class)
+        instance_name = rds_ops.db_attach(endpoint, instance_class)
     except ClientError as exc:
         return PlainTextResponse(f"Attach error: {exc}", status_code=500)
 
@@ -304,11 +225,80 @@ async def attachdb_post(
 
     ip = _get_client_ip(request)
     _log_user_action(db, current_user.email, ip, "DB Attach", endpoint, instance_name)
-    _slack_post(instance_name, new_endpoint, "being attached", "Attaching", "dbAttach")
-    _send_email(instance_name, endpoint, "attached")
+    rds_ops.slack_post(instance_name, new_endpoint, "being attached", "Attaching", "dbAttach")
+    rds_ops.send_email(instance_name, endpoint, "attached")
 
     return PlainTextResponse(
         f"Database Instance: {instance_name} is being attached to cluster. "
         f"New Endpoint: {new_endpoint}",
         status_code=202,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Agentic Restore Workflow — orchestrates restore -> status -> attach -> notify
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/agent/restore-workflow", response_class=HTMLResponse)
+async def agent_workflow_page(
+    request: Request,
+    current_user: Optional[models.User] = Depends(security.get_optional_user),
+):
+    if not current_user:
+        return RedirectResponse(url="/login?next=/agent/restore-workflow", status_code=302)
+    return templates.TemplateResponse("agent_workflow.html", {
+        "request": request,
+        "current_user": current_user,
+        "name": current_user.name,
+        "client_ip": _get_client_ip(request),
+    })
+
+
+@router.post("/agent/restore-workflow", response_class=PlainTextResponse)
+async def agent_workflow_post(
+    request: Request,
+    snapshotname: str = Form(...),
+    endpoint: str = Form(...),
+    instanceclass: str = Form(""),
+    goal: str = Form(""),
+    current_user: Optional[models.User] = Depends(security.get_optional_user),
+    db: Session = Depends(get_db),
+):
+    if not current_user:
+        return RedirectResponse(url="/login?next=/agent/restore-workflow", status_code=302)
+
+    snapshot_name = snapshotname.strip()
+    source_endpoint = endpoint.strip()
+    target_instance_class = instanceclass.strip() or None
+    ip = _get_client_ip(request)
+
+    default_goal = f"Restore snapshot {snapshot_name} and report the resulting status."
+    if target_instance_class:
+        default_goal += f" Then attach a {target_instance_class} instance if the endpoint is a cluster."
+    operator_goal = goal.strip() or default_goal
+
+    def on_step(tool: str, tool_input: str, result: str) -> None:
+        _log_user_action(db, current_user.email, ip, f"Agent: {tool}", source_endpoint, result[:200])
+
+    try:
+        orchestrator = RestoreOrchestrator()
+    except RuntimeError as exc:
+        return PlainTextResponse(f"Agent orchestration unavailable: {exc}", status_code=503)
+
+    try:
+        result = orchestrator.run(
+            goal=operator_goal,
+            snapshot_name=snapshot_name,
+            source_endpoint=source_endpoint,
+            target_instance_class=target_instance_class,
+            on_step=on_step,
+        )
+    except Exception as exc:  # Anthropic API errors, unexpected tool failures, etc.
+        return PlainTextResponse(f"Agent workflow error: {exc}", status_code=500)
+
+    transcript_lines = [
+        f"[{i}] {step.tool}({step.input}) -> {step.result}"
+        for i, step in enumerate(result.steps, start=1)
+    ]
+    body = "\n".join(transcript_lines + ["", result.final_message])
+    return PlainTextResponse(body, status_code=202)

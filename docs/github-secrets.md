@@ -11,6 +11,14 @@ Configure these in **Settings → Secrets and variables → Actions** of your Gi
 | `JWT_SECRET_KEY` | JWT signing key — must be long, random, unique per environment | `openssl rand -hex 32` |
 | `SLACK_WEBHOOK_URL` | Slack incoming-webhook URL for deploy notifications | `https://hooks.slack.com/services/T.../B.../...` |
 | `DB_PASSWORD` | PostgreSQL password injected into the K8s Secret manifest | — |
+| `ANTHROPIC_API_KEY` | Claude API key powering the USER app's `/agent/restore-workflow` orchestrator | `sk-ant-...` |
+
+> `ANTHROPIC_API_KEY` is a **runtime** secret for the USER_FASTAPI app (see
+> `dockerized/USER_FASTAPI/startup.sh`), not currently wired into the K8s
+> Secret manifests or deploy workflows. For a cluster deployment, add it to
+> `secret.yaml` / `deployment.yaml` (and the corresponding `envsubst`
+> variables in the deploy workflow) the same way `JWT_SECRET_KEY` is handled.
+> For local/dev runs, just `export ANTHROPIC_API_KEY=...` before `startup.sh`.
 
 ---
 

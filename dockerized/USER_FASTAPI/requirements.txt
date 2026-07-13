@@ -22,6 +22,9 @@ psycopg2-binary>=2.9.9
 boto3>=1.34.0
 botocore>=1.34.0
 
+# Agentic orchestration (restore workflow)
+anthropic>=0.40.0
+
 # HTTP client (Slack notifications)
 requests>=2.31.0
 simplejson>=3.19.0
