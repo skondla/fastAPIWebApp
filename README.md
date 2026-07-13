@@ -12,6 +12,8 @@ A multi-cloud, containerized web application and REST API for managing AWS RDS d
 
 > **Flask → FastAPI Migration** — Both the USER and ADMIN applications have been fully converted from Flask to FastAPI (Python 3.11, Uvicorn, JWT OAuth 2.0, Pydantic v2, OWASP Top 10 middleware). The FastAPI versions live in `dockerized/USER_FASTAPI/` and `dockerized/ADMIN_FASTAPI/`. The original Flask source files in `dockerized/USER/` and `dockerized/ADMIN/` are retained as legacy reference.
 
+> **Agentic AI Orchestration** — USER_FASTAPI includes a [LangGraph](https://langchain-ai.github.io/langgraph/)-powered ReAct agent (`lib/agent_orchestrator.py`) that plans and executes the restore → status-check → optional-attach → notify workflow as a single operation, via `GET/POST /agent/restore-workflow`. See [Agentic Restore Workflow](#agentic-restore-workflow--langgraph-orchestration) below.
+
 ---
 
 ## Table of Contents
@@ -28,6 +30,7 @@ A multi-cloud, containerized web application and REST API for managing AWS RDS d
 - [Data Flow Diagrams](#data-flow-diagrams)
   - [Authentication & JWT Issuance](#authentication--jwt-issuance)
   - [RDS Restore Operation — End-to-End](#rds-restore-operation--end-to-end)
+  - [Agentic Restore Workflow — LangGraph Orchestration](#agentic-restore-workflow--langgraph-orchestration)
   - [Request Pipeline & OWASP Middleware Chain](#request-pipeline--owasp-middleware-chain)
 - [Network Architecture](#network-architecture)
   - [AWS VPC & EKS Network Topology](#aws-vpc--eks-network-topology)
@@ -53,8 +56,9 @@ The application exposes both a web interface (HTML/Jinja2) and a REST API for th
 1. **Restore** — Restore an AWS RDS instance or Aurora cluster from a snapshot.
 2. **Status** — Check the restore progress of a database instance or cluster.
 3. **Attach DB** — Attach a new instance to an existing Aurora DB cluster.
-4. **Authentication** — JWT-based login/signup with bcrypt password hashing.
-5. **Audit Logging** — Every user action is recorded (email, IP, timestamp, endpoint, request type).
+4. **Agent Workflow** — A LangGraph ReAct agent (Claude) plans and executes restore → status → attach → notify as one orchestrated operation instead of three manual steps.
+5. **Authentication** — JWT-based login/signup with bcrypt password hashing.
+6. **Audit Logging** — Every user action is recorded (email, IP, timestamp, endpoint, request type), including each tool call the agent makes.
 
 Authentication is required for all database operations. User signup is restricted to Admin console users only.
 
@@ -74,6 +78,7 @@ flowchart TB
     classDef aws fill:#FFEBEE,stroke:#C62828,stroke-width:2px,color:#B71C1C
     classDef cicd fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px,color:#4A148C
     classDef k8s fill:#E0F7FA,stroke:#00838F,stroke-width:2px,color:#006064
+    classDef ai fill:#EDE7F6,stroke:#4527A0,stroke-width:2px,color:#311B92
 
     subgraph Clients["Clients"]
         B["Browser<br/>HTML + Jinja2"]
@@ -110,6 +115,10 @@ flowchart TB
         SLACK["Slack Webhook"]
     end
 
+    subgraph AgentAI["Agentic Orchestration"]
+        CLAUDE["Anthropic Claude API<br/>LangGraph ReAct agent<br/>tool-calling"]
+    end
+
     subgraph Control["Control Plane"]
         GH["GitHub<br/>source of truth"]
         GHA["GitHub Actions<br/>DevSecOps Pipeline"]
@@ -129,6 +138,7 @@ flowchart TB
     U1 -->|"HTTPS API"| RDS
     U1 -->|"SMTP"| SES
     U1 -->|"Webhook"| SLACK
+    U1 -->|"HTTPS API<br/>tool-calling"| CLAUDE
     U1 -.->|"fetch creds"| SM
     A1 -.->|"fetch creds"| SM
 
@@ -146,6 +156,7 @@ flowchart TB
     class GH,GHA,ARGO cicd
     class HPA,LB k8s
     class SLACK cicd
+    class CLAUDE ai
 ```
 
 ### Application Component Architecture
@@ -174,11 +185,13 @@ flowchart LR
     subgraph ROUTER["FastAPI Router Dispatch"]
         direction TB
         AUTH["auth.py<br/>/login · /signup · /logout<br/>/auth/token · /auth/refresh<br/>/auth/me · /auth/register"]
-        MAIN["main_router.py<br/>/ · /restore · /status<br/>/attachdb · /profile"]
+        MAIN["main_router.py<br/>/ · /restore · /status<br/>/attachdb · /profile<br/>/agent/restore-workflow"]
     end
 
     AUTH --> SEC
     MAIN --> SEC
+
+    MAIN -->|"RestoreOrchestrator.run"| AGENT["agent_orchestrator.py<br/>LangGraph create_react_agent<br/>tools: restore · status · attach · notify"]
 
     subgraph SEC["Security Layer · security.py"]
         direction TB
@@ -204,11 +217,14 @@ flowchart LR
     MAIN -->|"boto3"| AWS_RDS[("AWS RDS or Aurora")]
     MAIN -->|"requests"| SLACK([Slack])
     MAIN -->|"mailx"| SES([AWS SES])
+    AGENT -->|"rds_ops.py<br/>boto3 · requests · mailx"| AWS_RDS
+    AGENT -->|"HTTPS API"| CLAUDE([Anthropic Claude API])
 
     class MW1,MW2,MW3,MW4 mw
     class AUTH,MAIN route
     class JWT,BCRYPT,DEPS,SSRF sec
     class SQLA,MODELS,SCHEMAS model
+    class AGENT,CLAUDE sec
 ```
 
 ### Deployment Topology — Multi-Cloud Kubernetes
@@ -273,6 +289,7 @@ flowchart TB
 | Security | OWASP Top 10 middleware, rate-limiting, security headers | OWASP Top 10 middleware, rate-limiting, security headers |
 | AWS SDK | boto3 / botocore | boto3 / botocore |
 | HTTP Client | requests | requests |
+| Agentic Orchestration | — | **LangGraph** ReAct agent + **LangChain** tools over **Claude** (Anthropic) |
 | Testing | pytest + httpx | pytest + httpx |
 | Port | 30443 (HTTPS) | 50443 (HTTPS) |
 
@@ -333,11 +350,13 @@ fastAPIWebApp/
 │   │   ├── security_middleware.py# OWASP Top 10 middleware + SSRF endpoint validation
 │   │   ├── routers/
 │   │   │   ├── auth.py           # /login /signup /logout + OAuth2 API endpoints
-│   │   │   └── main_router.py    # / /restore /status /attachdb (RDS ops + audit log)
+│   │   │   └── main_router.py    # / /restore /status /attachdb /agent/restore-workflow
 │   │   ├── lib/
 │   │   │   ├── rdsAdmin.py       # RDS: RDSDescribe, RDSCreate, RDSRestore, RDSDelete
+│   │   │   ├── rds_ops.py        # Shared restore/status/attach/notify wrappers
+│   │   │   ├── agent_orchestrator.py # LangGraph ReAct agent — plans/executes the restore workflow
 │   │   │   └── utils.py          # AWS Secrets Manager helper
-│   │   ├── templates/            # Jinja2 HTML: base, login, signup, restore, status, attachdb
+│   │   ├── templates/            # Jinja2 HTML: base, login, signup, restore, status, attachdb, agent_workflow
 │   │   ├── docs/                 # API docs (api.md, architecture.drawio)
 │   │   ├── Dockerfile            # Python 3.11-slim, Uvicorn, self-signed TLS, port 50443
 │   │   ├── startup.sh            # Container entrypoint
@@ -434,6 +453,8 @@ fastAPIWebApp/
 | `POST` | `/status` | Yes | Poll RDS restore / instance status |
 | `GET` | `/attachdb` | Yes | Attach DB form |
 | `POST` | `/attachdb` | Yes | Create and attach instance to Aurora cluster |
+| `GET` | `/agent/restore-workflow` | Yes | Agent workflow form (snapshot, source endpoint, optional target instance class + goal) |
+| `POST` | `/agent/restore-workflow` | Yes | LangGraph agent plans/executes restore → status → optional attach → notify in one call |
 
 #### OAuth2 / REST API (JSON, Bearer token)
 
@@ -610,6 +631,47 @@ sequenceDiagram
 
         API-->>U: 202 Accepted<br/>Database X is being restored<br/>New Endpoint and Status returned
     end
+```
+
+### Agentic Restore Workflow — LangGraph Orchestration
+
+`POST /agent/restore-workflow` replaces three manual form submissions (restore, status, attach) with a single call. A LangGraph `create_react_agent` ReAct loop plans and executes the minimum necessary tool calls — capped at 8 tool calls and 30s of total poll-wait so it stays inside one HTTP request. See [`lib/agent_orchestrator.py`](dockerized/USER_FASTAPI/lib/agent_orchestrator.py).
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as "Authenticated User"
+    participant API as "USER_FASTAPI<br/>POST /agent/restore-workflow"
+    participant ORC as "RestoreOrchestrator<br/>agent_orchestrator.py"
+    participant GRAPH as "LangGraph<br/>create_react_agent"
+    participant LLM as "Claude<br/>Anthropic API"
+    participant TOOLS as "LangChain Tools<br/>rds_ops.py"
+    participant AWS as "AWS RDS or Aurora"
+    participant PG as "PostgreSQL<br/>user_info audit table"
+
+    U->>API: POST /agent/restore-workflow<br/>snapshotname + endpoint + goal (optional)
+    API->>API: get_optional_user · enforce auth
+    API->>ORC: run goal, snapshot_name, source_endpoint, target_instance_class
+    ORC->>GRAPH: stream messages=[goal] · system=SYSTEM_PROMPT · tools
+
+    loop up to 8 tool calls
+        GRAPH->>LLM: invoke messages + tool schemas
+        LLM-->>GRAPH: AIMessage — tool_call or final text
+
+        alt tool_call requested
+            GRAPH->>TOOLS: dispatch e.g. restore_snapshot · check_db_status · attach_instance · notify
+            TOOLS->>AWS: boto3 RDS API call
+            AWS-->>TOOLS: state / identifiers
+            TOOLS-->>GRAPH: ToolMessage result
+            GRAPH->>ORC: on_step callback tool, input, result
+            ORC->>PG: INSERT INTO user_info<br/>"Agent: {tool}" · result[:200]
+        else final answer
+            GRAPH-->>ORC: plain-text summary
+        end
+    end
+
+    ORC-->>API: OrchestrationResult final_message + steps[]
+    API-->>U: 202 Accepted<br/>step-by-step transcript + summary
 ```
 
 ### Request Pipeline & OWASP Middleware Chain
@@ -1154,6 +1216,13 @@ AWS_SECRET_ACCESS_KEY=<secret>
 SECRET_KEY=<jwt-secret>
 ```
 
+USER_FASTAPI additionally needs these to enable `/agent/restore-workflow` (see [`docs/github-secrets.md`](docs/github-secrets.md)):
+
+```bash
+ANTHROPIC_API_KEY=<claude-api-key>
+ANTHROPIC_MODEL=claude-sonnet-5  # optional, defaults to claude-sonnet-5
+```
+
 ### Initialize the Database
 
 ```bash
@@ -1234,6 +1303,37 @@ curl -k "https://192.168.2.15:50443/login" \
 curl -k "https://192.168.2.15:50443/attachdb" \
     --data-urlencode "endpoint=${endpoint}" \
     --data-urlencode "instanceclass=${instanceclass}" \
+    --cookie cookies.txt --cookie-jar cookies.txt --verbose
+    echo
+
+rm -f cookies.txt
+```
+
+### Run the Agentic Restore Workflow
+
+```bash
+#!/bin/bash
+# Restore + status + optional attach + notify, planned and executed by the
+# LangGraph agent in a single call. Requires ANTHROPIC_API_KEY to be set on
+# the running USER_FASTAPI container.
+
+snapshotname=${1}    # e.g. my-snapshot-name
+endpoint=${2}        # e.g. myDB.cluster-XXXYYY.us-east-1.rds.amazonaws.com
+instanceclass=${3}   # optional — attach a reader once restored, e.g. db.r5.large
+
+EMAIL=$(cat ~/.password/mySecrets2 | grep email | awk '{print $2}')
+PASSWORD=$(cat ~/.password/mySecrets2 | grep password | awk '{print $2}')
+
+curl -k "https://192.168.2.15:50443/login" \
+    --data-urlencode "email=${EMAIL}" \
+    --data-urlencode "password=${PASSWORD}" \
+    --cookie-jar cookies.txt --verbose > login_log.html
+
+curl -k "https://192.168.2.15:50443/agent/restore-workflow" \
+    --data-urlencode "snapshotname=${snapshotname}" \
+    --data-urlencode "endpoint=${endpoint}" \
+    --data-urlencode "instanceclass=${instanceclass}" \
+    --data-urlencode "goal=Restore this snapshot and attach a reader once it's ready." \
     --cookie cookies.txt --cookie-jar cookies.txt --verbose
     echo
 

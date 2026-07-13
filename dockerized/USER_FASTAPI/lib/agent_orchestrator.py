@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # Author: skondla@me.com
-# Purpose: Multi-step agent orchestrator for the DB restore workflow.
-#          Uses Claude tool-use to plan and sequence the existing atomic
-#          RDS operations (restore -> status check -> optional attach ->
-#          notify) that previously required three separate manual form
-#          submissions.
+# Purpose: Multi-step agent orchestrator for the DB restore workflow, built on
+#          LangGraph's ReAct agent (LangChain tools + Claude). Plans and
+#          sequences the existing atomic RDS operations (restore -> status
+#          check -> optional attach -> notify) that previously required three
+#          separate manual form submissions.
 # -*- coding: utf-8 -*-
 
 import os
@@ -12,8 +12,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from anthropic import Anthropic
 from botocore.exceptions import ClientError
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage
+from langchain_core.tools import StructuredTool
+from langgraph.prebuilt import create_react_agent
 
 import rds_ops
 
@@ -21,6 +24,7 @@ DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 MAX_TOOL_STEPS = 8
 MAX_WAIT_SECONDS_PER_CALL = 15
 MAX_TOTAL_WAIT_SECONDS = 30
+RECURSION_LIMIT = 50
 
 SYSTEM_PROMPT = """\
 You are the workflow orchestrator for an RDS DB Restore Management Tool.
@@ -45,97 +49,6 @@ short plain-text summary for the operator: what was done, the resulting
 endpoint(s), and the final observed status.
 """
 
-TOOLS = [
-    {
-        "name": "restore_snapshot",
-        "description": (
-            "Restore an RDS DB instance or cluster from a snapshot. Looks up "
-            "subnet/security-group/engine info from the source endpoint and "
-            "kicks off the restore. Returns the new endpoint identifier."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "snapshot_name": {
-                    "type": "string",
-                    "description": "RDS snapshot identifier to restore from.",
-                },
-                "source_endpoint": {
-                    "type": "string",
-                    "description": (
-                        "Original DB/cluster endpoint the snapshot was taken "
-                        "from. Endpoints containing 'cluster' are treated as "
-                        "Aurora clusters."
-                    ),
-                },
-            },
-            "required": ["snapshot_name", "source_endpoint"],
-        },
-    },
-    {
-        "name": "check_db_status",
-        "description": (
-            "Check the current status of a restored DB instance or cluster. "
-            "Optionally wait a few seconds first to let AWS state settle."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "source_endpoint": {
-                    "type": "string",
-                    "description": "Original endpoint (used only to detect cluster vs instance).",
-                },
-                "new_endpoint": {
-                    "type": "string",
-                    "description": "Identifier of the restored DB instance/cluster to check.",
-                },
-                "wait_seconds": {
-                    "type": "integer",
-                    "description": "Seconds to wait before checking (0-15).",
-                    "default": 0,
-                },
-            },
-            "required": ["source_endpoint", "new_endpoint"],
-        },
-    },
-    {
-        "name": "attach_instance",
-        "description": (
-            "Attach a new reader instance to an existing Aurora cluster. "
-            "Only valid when the endpoint is a cluster."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "cluster_endpoint": {"type": "string"},
-                "instance_class": {
-                    "type": "string",
-                    "description": "e.g. db.r5.large",
-                },
-            },
-            "required": ["cluster_endpoint", "instance_class"],
-        },
-    },
-    {
-        "name": "notify",
-        "description": (
-            "Send a Slack message and email notifying the team of a workflow "
-            "state change. Call once after restore, and once more after an "
-            "attach if one was performed."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "identifier": {"type": "string", "description": "Snapshot or instance name."},
-                "endpoint": {"type": "string", "description": "New/target endpoint."},
-                "state": {"type": "string", "description": "Observed DB state, e.g. 'creating'."},
-                "action": {"type": "string", "description": "e.g. 'Restoring', 'Attaching'."},
-            },
-            "required": ["identifier", "endpoint", "state", "action"],
-        },
-    },
-]
-
 
 @dataclass
 class OrchestrationStep:
@@ -152,54 +65,113 @@ class OrchestrationResult:
 
 
 class RestoreOrchestrator:
-    """Plans and executes the restore -> status -> attach -> notify workflow."""
+    """Plans and executes the restore -> status -> attach -> notify workflow
+    using a LangGraph ReAct agent over LangChain tools wrapping the existing
+    RDS operations in rds_ops.
+    """
 
     def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_MODEL):
         api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is not configured.")
-        self._client = Anthropic(api_key=api_key)
-        self._model = model
+        self._chat_model = ChatAnthropic(model=model, api_key=api_key, temperature=0)
 
-    def _dispatch(self, name: str, tool_input: dict, wait_budget: dict) -> str:
-        if name == "restore_snapshot":
-            snapshot_name = tool_input["snapshot_name"].strip()
-            source_endpoint = tool_input["source_endpoint"].strip()
-            new_endpoint = snapshot_name + "." + source_endpoint.split(".", 1)[1]
-            rds_ops.db_restore(snapshot_name, source_endpoint)
-            return f"Restore initiated. New endpoint: {new_endpoint}"
+    def _build_tools(
+        self,
+        steps: list,
+        wait_budget: dict,
+        on_step: Optional[Callable[[str, str, str], None]],
+    ) -> list:
+        def _record(name: str, tool_input: dict, result_text: str, ok: bool) -> str:
+            steps.append(OrchestrationStep(tool=name, input=tool_input, result=result_text, ok=ok))
+            if on_step:
+                on_step(name, str(tool_input), result_text)
+            return result_text
 
-        if name == "check_db_status":
-            wait_seconds = min(
-                int(tool_input.get("wait_seconds", 0) or 0), MAX_WAIT_SECONDS_PER_CALL
-            )
-            wait_seconds = min(wait_seconds, max(0, MAX_TOTAL_WAIT_SECONDS - wait_budget["used"]))
-            if wait_seconds > 0:
-                time.sleep(wait_seconds)
-                wait_budget["used"] += wait_seconds
-            state = rds_ops.db_status(tool_input["source_endpoint"], tool_input["new_endpoint"])
-            return f"Status: {state}"
+        def restore_snapshot(snapshot_name: str, source_endpoint: str) -> str:
+            """Restore an RDS DB instance or cluster from a snapshot. Looks up
+            subnet/security-group/engine info from the source endpoint and
+            kicks off the restore. Returns the new endpoint identifier.
+            Endpoints containing 'cluster' are treated as Aurora clusters.
+            """
+            snapshot_name = snapshot_name.strip()
+            source_endpoint = source_endpoint.strip()
+            tool_input = {"snapshot_name": snapshot_name, "source_endpoint": source_endpoint}
+            try:
+                new_endpoint = snapshot_name + "." + source_endpoint.split(".", 1)[1]
+                rds_ops.db_restore(snapshot_name, source_endpoint)
+                return _record(
+                    "restore_snapshot", tool_input,
+                    f"Restore initiated. New endpoint: {new_endpoint}", True,
+                )
+            except ClientError as exc:
+                return _record(
+                    "restore_snapshot", tool_input, f"Error: AWS call failed: {exc}", False
+                )
 
-        if name == "attach_instance":
-            cluster_endpoint = tool_input["cluster_endpoint"].strip()
+        def check_db_status(source_endpoint: str, new_endpoint: str, wait_seconds: int = 0) -> str:
+            """Check the current status of a restored DB instance or cluster.
+            Optionally wait a few seconds first (0-15) to let AWS state settle.
+            """
+            tool_input = {
+                "source_endpoint": source_endpoint,
+                "new_endpoint": new_endpoint,
+                "wait_seconds": wait_seconds,
+            }
+            try:
+                wait = min(int(wait_seconds or 0), MAX_WAIT_SECONDS_PER_CALL)
+                wait = min(wait, max(0, MAX_TOTAL_WAIT_SECONDS - wait_budget["used"]))
+                if wait > 0:
+                    time.sleep(wait)
+                    wait_budget["used"] += wait
+                state = rds_ops.db_status(source_endpoint, new_endpoint)
+                return _record("check_db_status", tool_input, f"Status: {state}", True)
+            except ClientError as exc:
+                return _record(
+                    "check_db_status", tool_input, f"Error: AWS call failed: {exc}", False
+                )
+
+        def attach_instance(cluster_endpoint: str, instance_class: str) -> str:
+            """Attach a new reader instance to an existing Aurora cluster.
+            Only valid when the endpoint is a cluster.
+            """
+            cluster_endpoint = cluster_endpoint.strip()
+            instance_class = instance_class.strip()
+            tool_input = {"cluster_endpoint": cluster_endpoint, "instance_class": instance_class}
             if "cluster" not in cluster_endpoint:
-                return f"Error: {cluster_endpoint} is not a cluster; cannot attach."
-            instance_name = rds_ops.db_attach(cluster_endpoint, tool_input["instance_class"].strip())
-            new_endpoint = f"{instance_name}.{cluster_endpoint.split('.', 1)[1]}"
-            return f"Attach initiated. Instance: {instance_name}, new endpoint: {new_endpoint}"
+                return _record(
+                    "attach_instance", tool_input,
+                    f"Error: {cluster_endpoint} is not a cluster; cannot attach.", False,
+                )
+            try:
+                instance_name = rds_ops.db_attach(cluster_endpoint, instance_class)
+                new_endpoint = f"{instance_name}.{cluster_endpoint.split('.', 1)[1]}"
+                return _record(
+                    "attach_instance", tool_input,
+                    f"Attach initiated. Instance: {instance_name}, new endpoint: {new_endpoint}",
+                    True,
+                )
+            except ClientError as exc:
+                return _record(
+                    "attach_instance", tool_input, f"Error: AWS call failed: {exc}", False
+                )
 
-        if name == "notify":
-            rds_ops.slack_post(
-                tool_input["identifier"],
-                tool_input["endpoint"],
-                tool_input["state"],
-                tool_input["action"],
-                "dbAgentOrchestrator",
-            )
-            rds_ops.send_email(tool_input["identifier"], tool_input["endpoint"], tool_input["state"])
-            return "Notification sent."
+        def notify(identifier: str, endpoint: str, state: str, action: str) -> str:
+            """Send a Slack message and email notifying the team of a workflow
+            state change. Call once after restore, and once more after an
+            attach if one was performed.
+            """
+            tool_input = {"identifier": identifier, "endpoint": endpoint, "state": state, "action": action}
+            rds_ops.slack_post(identifier, endpoint, state, action, "dbAgentOrchestrator")
+            rds_ops.send_email(identifier, endpoint, state)
+            return _record("notify", tool_input, "Notification sent.", True)
 
-        return f"Error: unknown tool '{name}'"
+        return [
+            StructuredTool.from_function(func=restore_snapshot, name="restore_snapshot"),
+            StructuredTool.from_function(func=check_db_status, name="check_db_status"),
+            StructuredTool.from_function(func=attach_instance, name="attach_instance"),
+            StructuredTool.from_function(func=notify, name="notify"),
+        ]
 
     def run(
         self,
@@ -209,58 +181,34 @@ class RestoreOrchestrator:
         target_instance_class: Optional[str] = None,
         on_step: Optional[Callable[[str, str, str], None]] = None,
     ) -> OrchestrationResult:
+        steps: list[OrchestrationStep] = []
+        wait_budget = {"used": 0}
+        tools = self._build_tools(steps, wait_budget, on_step)
+        agent = create_react_agent(self._chat_model, tools, prompt=SYSTEM_PROMPT)
+
         user_prompt = (
             f"Operator request: {goal}\n"
             f"snapshot_name: {snapshot_name}\n"
             f"source_endpoint: {source_endpoint}\n"
             f"target_instance_class: {target_instance_class or '(not requested)'}"
         )
-        messages = [{"role": "user", "content": user_prompt}]
-        steps: list[OrchestrationStep] = []
-        wait_budget = {"used": 0}
 
-        for _ in range(MAX_TOOL_STEPS):
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=1024,
-                system=SYSTEM_PROMPT,
-                tools=TOOLS,
-                messages=messages,
-            )
-            messages.append({"role": "assistant", "content": response.content})
+        final_message = "Stopped after reaching the maximum number of workflow steps."
+        tool_call_count = 0
+        for update in agent.stream(
+            {"messages": [("user", user_prompt)]},
+            config={"recursion_limit": RECURSION_LIMIT},
+            stream_mode="updates",
+        ):
+            for node_update in update.values():
+                for msg in node_update.get("messages", []):
+                    if not isinstance(msg, AIMessage):
+                        continue
+                    if msg.tool_calls:
+                        tool_call_count += len(msg.tool_calls)
+                    elif isinstance(msg.content, str) and msg.content:
+                        final_message = msg.content
+            if tool_call_count >= MAX_TOOL_STEPS:
+                break
 
-            if response.stop_reason != "tool_use":
-                final_text = "".join(
-                    block.text for block in response.content if block.type == "text"
-                )
-                return OrchestrationResult(final_message=final_text, steps=steps)
-
-            tool_results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                try:
-                    result_text = self._dispatch(block.name, block.input, wait_budget)
-                    ok = not result_text.startswith("Error:")
-                except ClientError as exc:
-                    result_text = f"Error: AWS call failed: {exc}"
-                    ok = False
-                steps.append(
-                    OrchestrationStep(tool=block.name, input=block.input, result=result_text, ok=ok)
-                )
-                if on_step:
-                    on_step(block.name, str(block.input), result_text)
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result_text,
-                        "is_error": not ok,
-                    }
-                )
-            messages.append({"role": "user", "content": tool_results})
-
-        return OrchestrationResult(
-            final_message="Stopped after reaching the maximum number of workflow steps.",
-            steps=steps,
-        )
+        return OrchestrationResult(final_message=final_message, steps=steps)
