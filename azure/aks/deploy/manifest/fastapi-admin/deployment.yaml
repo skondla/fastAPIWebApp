@@ -33,6 +33,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: ${APP_NAME}-secrets
       initContainers:
         - name: wait-for-db
           image: busybox:1.36
@@ -65,6 +71,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
           readinessProbe:
             httpGet: { path: /, port: 30443, scheme: HTTPS }
             initialDelaySeconds: 10

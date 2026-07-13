@@ -5,7 +5,9 @@
       "Bash(python3 /tmp/harden_deployments.py)",
       "Bash(python3 /tmp/gen_netpol.py)",
       "Bash(python3 -c ' *)",
-      "Bash(sed -n '/for manifest in/,/done/p' .github/workflows/devsecops-fastapi-user-aks.yml)"
+      "Bash(sed -n '/for manifest in/,/done/p' .github/workflows/devsecops-fastapi-user-aks.yml)",
+      "Bash(python3 /tmp/gen_csi.py)",
+      "Bash(python3 /tmp/add_csi_mount.py)"
     ]
   }
 }
