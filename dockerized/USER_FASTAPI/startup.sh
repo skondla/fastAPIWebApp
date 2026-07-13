@@ -34,4 +34,4 @@ exec uvicorn main:app \
     --ssl-keyfile  "${SSL_KEY}" \
     --workers 2 \
     --log-level info \
-    2>&1 | tee /app/fastapi_user.log
+    2>&1 | tee /tmp/fastapi_user.log

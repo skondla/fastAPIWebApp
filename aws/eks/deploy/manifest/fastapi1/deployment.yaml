@@ -41,6 +41,9 @@ spec:
           type: RuntimeDefault
 
       # ── Init: wait for DB ───────────────────────────────────────────────
+      volumes:
+        - name: tmp
+          emptyDir: {}
       initContainers:
         - name: wait-for-db
           image: busybox:1.36
@@ -88,11 +91,16 @@ spec:
           # ── Security Context (Container) ─────────────────────────────
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false   # uvicorn writes temp files
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
             capabilities:
               drop: ["ALL"]
+
+          # ── Volumes ──────────────────────────────────────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
 
           # ── Probes ───────────────────────────────────────────────────
           readinessProbe:

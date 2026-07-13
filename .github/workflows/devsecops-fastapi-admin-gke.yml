@@ -65,7 +65,7 @@ jobs:
           bandit -r dockerized/ADMIN_FASTAPI/ \
             --configfile dockerized/ADMIN_FASTAPI/.bandit \
             --format sarif --output bandit-results.sarif \
-            --severity-level medium || true
+            --severity-level high
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: bandit-results.sarif, category: bandit }
 
@@ -76,7 +76,7 @@ jobs:
             --config p/jwt --config p/secrets \
             --config dockerized/ADMIN_FASTAPI/.semgrep.yml \
             dockerized/ADMIN_FASTAPI/ \
-            --sarif --output semgrep-results.sarif || true
+            --error --sarif --output semgrep-results.sarif
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: semgrep-results.sarif, category: semgrep }
 
@@ -95,7 +95,7 @@ jobs:
       - name: pip-audit
         run: |
           pip-audit -r dockerized/ADMIN_FASTAPI/requirements.txt \
-            --format sarif --output pip-audit-results.sarif || true
+            --format sarif --output pip-audit-results.sarif
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: pip-audit-results.sarif, category: pip-audit }
       - name: Trivy FS
@@ -106,7 +106,7 @@ jobs:
           format: sarif
           output: trivy-fs-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: "0"
+          exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-fs-results.sarif, category: trivy-fs }
 
@@ -161,7 +161,7 @@ jobs:
           format: sarif
           output: trivy-image-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: "0"
+          exit-code: "1"
       - uses: github/codeql-action/upload-sarif@v3
         with: { sarif_file: trivy-image-results.sarif, category: trivy-image }
 
@@ -177,20 +177,65 @@ jobs:
         with:
           directory: gcp/gke/deploy/terraform-fastapi
           framework: terraform
-          soft_fail: true
+          soft_fail: false
       - uses: bridgecrewio/checkov-action@master
         with:
           directory: gcp/gke/deploy/manifests/fastapi-admin
           framework: kubernetes
-          soft_fail: true
+          soft_fail: false
 
 # ════════════════════════════════════════════════════════════════════════════
-# 7. DEPLOY — GKE
+# 7. SIGN & SBOM
+# ════════════════════════════════════════════════════════════════════════════
+  sign-and-sbom:
+    name: "🔏 Sign Image & Generate SBOM"
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Authenticate to GCP (Workload Identity)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:            ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GAR
+        run: gcloud auth configure-docker ${{ env.GKE_REGION }}-docker.pkg.dev
+
+      - name: Keyless sign the image
+        run: cosign sign --yes "${{ needs.build.outputs.image }}"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ needs.build.outputs.image }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Attest SBOM to the image
+        run: cosign attest --yes --predicate sbom.spdx.json --type spdxjson "${{ needs.build.outputs.image }}"
+
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom-gke-admin, path: sbom.spdx.json }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. DEPLOY — GKE
 # ════════════════════════════════════════════════════════════════════════════
   deploy:
     name: "🚀 Deploy to GKE"
     runs-on: ubuntu-latest
-    needs: [build, container-scan, iac-scan]
+    needs: [build, container-scan, iac-scan, sign-and-sbom]
     environment: staging
     steps:
       - uses: actions/checkout@v4
@@ -214,6 +259,7 @@ jobs:
           export FASTAPI_IMAGE GKE_NAMESPACE APP_NAME APP_PORT GKE_SA
           for manifest in \
             gcp/gke/deploy/manifests/fastapi-admin/namespace.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/networkpolicy.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/secret.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/configmap.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/deployment.yaml \
@@ -232,7 +278,7 @@ jobs:
             | grep -i "Admin" && echo "✅ OK" || echo "⚠️  LB warming up"
 
 # ════════════════════════════════════════════════════════════════════════════
-# 8. DAST
+# 9. DAST
 # ════════════════════════════════════════════════════════════════════════════
   dast:
     name: "⚡ DAST (OWASP ZAP)"
@@ -252,12 +298,12 @@ jobs:
         with:
           target: ${{ steps.svc.outputs.url }}
           rules_file_name: "dockerized/ADMIN_FASTAPI/.zap/rules.tsv"
-          fail_action: false
+          fail_action: true
       - uses: actions/upload-artifact@v4
         with: { name: zap-report-admin-gke, path: report_html.html }
 
 # ════════════════════════════════════════════════════════════════════════════
-# 9. NOTIFY
+# 10. NOTIFY
 # ════════════════════════════════════════════════════════════════════════════
   notify:
     name: "📣 Notify Slack"

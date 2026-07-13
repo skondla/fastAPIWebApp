@@ -27,4 +27,4 @@ exec uvicorn main:app \
     --ssl-keyfile  "${SSL_KEY}" \
     --workers 2 \
     --log-level info \
-    2>&1 | tee /app/fastapi_admin.log
+    2>&1 | tee /tmp/fastapi_admin.log

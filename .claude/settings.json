@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat)",
+      "Bash(python3 /tmp/harden_deployments.py)",
+      "Bash(python3 /tmp/gen_netpol.py)",
+      "Bash(python3 -c ' *)",
+      "Bash(sed -n '/for manifest in/,/done/p' .github/workflows/devsecops-fastapi-user-aks.yml)"
+    ]
+  }
+}
