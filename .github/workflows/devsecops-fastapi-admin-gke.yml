@@ -23,6 +23,7 @@ env:
   APP_PORT:       "30443"
   IMAGE_TAG:      ${{ github.sha }}
   PYTHON_VERSION: "3.11"
+  GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
 
 permissions:
   contents: read
@@ -260,7 +261,7 @@ jobs:
           for manifest in \
             gcp/gke/deploy/manifests/fastapi-admin/namespace.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/networkpolicy.yaml \
-            gcp/gke/deploy/manifests/fastapi-admin/secret.yaml \
+            gcp/gke/deploy/manifests/fastapi-admin/secretproviderclass.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/configmap.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/deployment.yaml \
             gcp/gke/deploy/manifests/fastapi-admin/service.yaml \

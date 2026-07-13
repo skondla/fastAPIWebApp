@@ -21,6 +21,8 @@ env:
   APP_PORT:             "30443"
   IMAGE_TAG:            ${{ github.sha }}
   PYTHON_VERSION:       "3.11"
+  AZURE_KEYVAULT_NAME:       ${{ secrets.AZURE_KEYVAULT_NAME }}
+  AZURE_KEYVAULT_CLIENT_ID:  ${{ secrets.AZURE_KEYVAULT_CLIENT_ID }}
 
 permissions:
   contents: read
@@ -265,7 +267,7 @@ jobs:
           for manifest in \
             azure/aks/deploy/manifest/fastapi-admin/namespace.yaml \
             azure/aks/deploy/manifest/fastapi-admin/networkpolicy.yaml \
-            azure/aks/deploy/manifest/fastapi-admin/secret.yaml \
+            azure/aks/deploy/manifest/fastapi-admin/secretproviderclass.yaml \
             azure/aks/deploy/manifest/fastapi-admin/configmap.yaml \
             azure/aks/deploy/manifest/fastapi-admin/deployment.yaml \
             azure/aks/deploy/manifest/fastapi-admin/service.yaml \

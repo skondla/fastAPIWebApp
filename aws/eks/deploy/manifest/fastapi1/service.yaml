@@ -2,21 +2,21 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${APP_NAME}
-  namespace: ${EKS_NAMESPACE}
+  name: fastapi-user-app
+  namespace: fastapi-namespace
   labels:
-    app: ${APP_NAME}
+    app: fastapi-user-app
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
     service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
-    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "${APP_PORT}"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "50443"
 spec:
   type: LoadBalancer
   selector:
-    app: ${APP_NAME}
+    app: fastapi-user-app
   ports:
     - name: https
-      port: ${APP_PORT}
+      port: 50443
       targetPort: 50443
       protocol: TCP
   sessionAffinity: None

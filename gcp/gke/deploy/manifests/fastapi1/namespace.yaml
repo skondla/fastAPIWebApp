@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ${GKE_NAMESPACE}
+  name: fastapi-namespace
   labels:
     app.kubernetes.io/name: fastapi-user-app
     environment: production
@@ -11,7 +11,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ${GKE_SA}
-  namespace: ${GKE_NAMESPACE}
+  name: fastapi-serviceaccount
+  namespace: fastapi-namespace
   annotations:
-    iam.gke.io/gcp-service-account: ${GKE_GSA_EMAIL}
+    iam.gke.io/gcp-service-account: CHANGEME-gke-gsa-email

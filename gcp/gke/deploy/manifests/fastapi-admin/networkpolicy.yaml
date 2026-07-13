@@ -2,12 +2,12 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: ${APP_NAME}-netpol
-  namespace: ${GKE_NAMESPACE}
+  name: fastapi-admin-app-netpol
+  namespace: fastapi-namespace
 spec:
   podSelector:
     matchLabels:
-      app: ${APP_NAME}
+      app: fastapi-admin-app
   policyTypes:
     - Ingress
     - Egress
@@ -15,7 +15,7 @@ spec:
     # Public-facing LoadBalancer Service — allow inbound from anywhere on the app port only.
     - ports:
         - protocol: TCP
-          port: ${APP_PORT}
+          port: 30443
   egress:
     # DNS, HTTPS (AWS/Azure/GCP APIs, Slack, Anthropic Claude API), Postgres.
     # Destination CIDR is intentionally unrestricted — RDS/Cloud SQL/SaaS endpoints

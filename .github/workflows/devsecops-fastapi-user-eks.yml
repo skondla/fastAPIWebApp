@@ -31,6 +31,7 @@ env:
   APP_PORT:        "50443"
   IMAGE_TAG:       ${{ github.sha }}
   PYTHON_VERSION:  "3.11"
+  AWS_SECRETS_MANAGER_SECRET_ARN: ${{ secrets.AWS_SECRETS_MANAGER_SECRET_ARN }}
 
 permissions:
   contents: read
@@ -328,7 +329,7 @@ jobs:
           for manifest in \
             aws/eks/deploy/manifest/fastapi1/namespace.yaml \
             aws/eks/deploy/manifest/fastapi1/networkpolicy.yaml \
-            aws/eks/deploy/manifest/fastapi1/secret.yaml \
+            aws/eks/deploy/manifest/fastapi1/secretproviderclass.yaml \
             aws/eks/deploy/manifest/fastapi1/configmap.yaml \
             aws/eks/deploy/manifest/fastapi1/deployment.yaml \
             aws/eks/deploy/manifest/fastapi1/service.yaml \
