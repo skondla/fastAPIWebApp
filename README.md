@@ -310,10 +310,14 @@ flowchart TB
 |---|---|
 | Containerization | Docker (Python 3.11-slim) |
 | Orchestration | Kubernetes (EKS, GKE, AKS) |
+| Manifest templating | Kustomize (per app × cloud base, `images:` transform for the deploy-time tag) |
 | IaC | Terraform (modular, AWS) |
-| CI/CD | GitHub Actions |
-| GitOps | ArgoCD |
-| Security Scanning | Trivy (CRITICAL severity) |
+| CI/CD | GitHub Actions — 10-stage pipeline, all scan gates blocking |
+| GitOps | **ArgoCD** — sole applier of cluster state (CI calls the ArgoCD API only) |
+| Supply-chain integrity | cosign (keyless image signing) + syft SBOM (SPDX) + attestation |
+| Secrets | Secrets Store CSI Driver → AWS Secrets Manager / Azure Key Vault / GCP Secret Manager |
+| Network security | Kubernetes NetworkPolicy (ingress/egress baseline, all 6 app × cloud combos) |
+| Security Scanning | Trivy (CRITICAL/HIGH, blocking), Checkov (blocking) |
 | Observability | Prometheus + Grafana (K8s operators) |
 | Message Queue | RabbitMQ (K8s operator) |
 | Cloud Providers | AWS (primary), GCP, Azure |
@@ -421,7 +425,9 @@ fastAPIWebApp/
 ├── kubernetes/
 │   └── operators/                # Grafana, Prometheus, RabbitMQ operators
 │
-├── argocd/                       # Helm-based ArgoCD install + ingress config
+├── argocd/                       # Real ArgoCD (sole applier) — install script + Application CRs
+│   ├── helm/argocd.sh            # Installs argo/argo-cd (previously mislabeled: installed Argo Workflows)
+│   └── apps/                     # 6 Application CRs — one per app x cloud, syncPolicy.automated
 │
 ├── actions/
 │   ├── Deploy-GKE.yml            # GKE DevSecOps pipeline (test → build → deploy)
@@ -839,10 +845,12 @@ flowchart TB
 
         HPA["HorizontalPodAutoscaler<br/>min=2 max=10<br/>cpu 70 percent · mem 80 percent"]:::hpa
 
-        SECRET["Secret fastapi-db-secret<br/>DB_HOST · DB_USER · DB_PASSWORD<br/>JWT_SECRET_KEY · AWS creds"]:::cfg
+        CSI["SecretProviderClass<br/>syncs AWS Secrets Manager<br/>-> Secret fastapi-db-secret"]:::cfg
         CM["ConfigMap fastapi-config<br/>APP_NAME · APP_PORT<br/>AWS_REGION · LOG_LEVEL"]:::cfg
 
-        SA["ServiceAccount fastapi-sa<br/>IRSA to IAM role RDS SES<br/>automountToken=false"]:::cfg
+        SA["ServiceAccount fastapi-sa<br/>IRSA to IAM role RDS SES + Secrets Manager<br/>automountToken=false"]:::cfg
+
+        NETPOL["NetworkPolicy<br/>ingress: app port only<br/>egress: DNS · HTTPS · 5432 only"]:::hpa
 
         SPREAD["topologySpreadConstraints<br/>maxSkew=1 · hostname<br/>DoNotSchedule"]:::hpa
 
@@ -860,9 +868,10 @@ flowchart TB
     INIT --> P2
     INIT --> P3
 
-    SECRET -.envFrom.-> P1
+    CSI -.CSI volume + envFrom.-> P1
     CM -.envFrom.-> P1
     SA -.identity.-> P1
+    NETPOL -.restricts.-> P1
 
     HPA -.scales.-> DEP
     SPREAD -.spreads.-> DEP
@@ -943,19 +952,31 @@ flowchart LR
 | Grafana | Metrics dashboards |
 | RabbitMQ | Message queue (for async RDS operations) |
 
-### ArgoCD GitOps (`argocd/`)
+### ArgoCD GitOps (`argocd/`) — sole applier of cluster state
 
-- Helm-based ArgoCD installation scripts.
-- Ingress configuration for ArgoCD UI.
-- Enables automated sync from Git to cluster state.
+- [`helm/argocd.sh`](argocd/helm/argocd.sh) installs real ArgoCD via the official `argo/argo-cd` chart (this previously installed the unrelated Argo Workflows chart despite the directory name — fixed).
+- [`apps/`](argocd/apps/) — one `Application` CR per app × cloud (6 total), each pointing at a Kustomize base under `azure/aks/deploy/manifest/`, `aws/eks/deploy/manifest/`, or `gcp/gke/deploy/manifests/`, with `syncPolicy.automated` (prune + selfHeal).
+- CI's `deploy` job no longer runs `kubectl apply` — it calls the ArgoCD API (`argocd app set --kustomize-image` → `sync` → `wait`) and ArgoCD does the actual reconciliation. See [ArgoCD GitOps setup](docs/github-secrets.md#argocd-gitops-setup--sole-applier) for one-time setup and the `CHANGEME` placeholders each Kustomize base needs filled in.
+
+### Secrets Store CSI Driver — replacing the plaintext K8s Secret
+
+Every `fastapi1/` and `fastapi-admin/` manifest directory (all 3 clouds) now ships a `secretproviderclass.yaml` that syncs DB credentials + the JWT signing key from AWS Secrets Manager / Azure Key Vault / GCP Secret Manager into the same `fastapi-db-secret` K8s Secret the app already reads — no application code change. The old plaintext `secret.yaml` is marked deprecated and no longer applied by CI. See [Secrets Store CSI Driver](docs/github-secrets.md#secrets-store-csi-driver-replacing-the-plaintext-k8s-secret) for the cluster-side prerequisites (driver install + IAM bindings) this can't provision from a repo edit alone.
+
+### NetworkPolicy + pod hardening baseline
+
+Every `fastapi1/` and `fastapi-admin/` deployment now ships a `networkpolicy.yaml` (ingress limited to the app port; egress limited to DNS/HTTPS/Postgres — previously zero policies protected these workloads) and the main container runs with `readOnlyRootFilesystem: true` across all three clouds (EKS previously disabled this with a `# uvicorn writes temp files` comment; an `emptyDir` mounted at `/tmp` — also used for the app's log file, see `startup.sh` — makes the read-only root filesystem actually work instead of being switched off).
 
 ---
 
 ## CI/CD Pipeline
 
-Six workflows live under [`.github/workflows/`](.github/workflows/) — one per (app × cloud) combination plus a standalone Trivy scan. Each pipeline is a 9-stage DevSecOps flow: secret-scan → SAST → SCA → build → container-scan → IaC-scan → deploy → DAST → notify.
+Six workflows live under [`.github/workflows/`](.github/workflows/) — one per (app × cloud) combination plus a standalone Trivy scan. Each pipeline is a 10-stage DevSecOps flow: secret-scan → SAST → SCA → build → container-scan → IaC-scan → sign-and-sbom → deploy → DAST → notify.
 
-### DevSecOps Pipeline — 9-Stage Flow
+> **Every scan gate now blocks the build.** Bandit/Semgrep/pip-audit/Trivy/Checkov/ZAP
+> used to run with `|| true` / `exit-code: "0"` / `soft_fail: true` / `fail_action: false`
+> — visibility without enforcement. All six now fail the pipeline on High/Critical findings.
+
+### DevSecOps Pipeline — 10-Stage Flow
 
 ```mermaid
 flowchart LR
@@ -986,14 +1007,17 @@ flowchart LR
 
     S5 --> S7
     S6 --> S7
-    S7["7. Deploy<br/>aws eks update-kubeconfig<br/>envsubst then kubectl apply<br/>kubectl rollout status 5m"]:::deploy
+    S7["7. Sign and SBOM<br/>cosign keyless sign<br/>syft SBOM + attest"]:::build
 
     S7 --> S8
-    S8["8. DAST<br/>OWASP ZAP Baseline<br/>main and master only"]:::dast
+    S8["8. Deploy<br/>argocd app set --kustomize-image<br/>argocd app sync and wait<br/>ArgoCD is sole applier"]:::deploy
 
-    S7 --> S9
     S8 --> S9
-    S9["9. Notify<br/>Slack webhook<br/>deploy + DAST results"]:::notify
+    S9["9. DAST<br/>OWASP ZAP Baseline<br/>main and master only"]:::dast
+
+    S8 --> S10
+    S9 --> S10
+    S10["10. Notify<br/>Slack webhook<br/>deploy + DAST results"]:::notify
 
     GHSEC[("GitHub Security<br/>Code Scanning tab")]
     S1 -.->|"SARIF"| GHSEC
@@ -1028,14 +1052,15 @@ flowchart TB
     subgraph WAVE2["Wave 2 — parallel after build"]
         direction LR
         J5["container-scan"]:::parallel
+        J10["sign-and-sbom"]:::parallel
     end
 
     J4 --> WAVE2
 
-    GATE2{"needs<br/>build · container-scan<br/>iac-scan"}:::gate
+    GATE2{"needs<br/>build · container-scan<br/>iac-scan · sign-and-sbom"}:::gate
     WAVE2 --> GATE2
     J7 --> GATE2
-    GATE2 --> J6["deploy<br/>environment staging or prod<br/>requires approval"]:::parallel
+    GATE2 --> J6["deploy — ArgoCD API only<br/>environment staging or prod<br/>requires approval"]:::parallel
 
     COND{"ref is main or master?"}:::cond
     J6 --> COND
@@ -1049,41 +1074,48 @@ flowchart TB
 
 ### GitOps Reconciliation Loop (ArgoCD)
 
-The DevSecOps pipeline pushes container images; ArgoCD pulls manifest changes from the same Git repo and reconciles cluster state. See [`argocd/helm/`](argocd/helm/).
+ArgoCD is the **sole applier** of cluster state — CI never runs `kubectl apply`.
+The pipeline builds and pushes the image, then calls the ArgoCD API to point
+each `Application` (see [`argocd/apps/`](argocd/apps/)) at the new tag and
+trigger a sync; ArgoCD (in-cluster, its own service account) does the actual
+reconciliation, and keeps polling Git independently of CI. See
+[`argocd/helm/argocd.sh`](argocd/helm/argocd.sh) and
+[ArgoCD GitOps setup](docs/github-secrets.md#argocd-gitops-setup--sole-applier).
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Dev as "Developer"
-    participant Repo as "GitHub Repo<br/>source of truth"
+    participant Repo as "GitHub Repo<br/>source of truth (Kustomize bases)"
     participant GHA as "GitHub Actions"
     participant Reg as "ECR or ACR or GCR"
     participant Argo as "ArgoCD Controller"
     participant K8s as "Kubernetes API"
     participant Pod as "Workload Pods"
 
-    Dev->>Repo: git push<br/>code + manifests
+    Dev->>Repo: git push<br/>app code (manifests are static Kustomize bases)
     Repo->>GHA: trigger workflow
 
-    Note over GHA: Stages 1 to 6 — sec scans · build · image scan
-    GHA->>Reg: docker push<br/>tag=git.sha
+    Note over GHA: Stages 1 to 7 — sec scans · build · image scan · sign+SBOM
+    GHA->>Reg: docker push + cosign sign<br/>tag=git.sha
 
-    par Pipeline driven deploy
-        GHA->>K8s: kubectl apply<br/>envsubst manifests
-        K8s->>Pod: rolling update
-        Pod-->>K8s: ready
-        GHA->>GHA: rollout status<br/>smoke test · ZAP
-    and GitOps reconciliation continuous
-        loop every 3 min poll
-            Argo->>Repo: git fetch HEAD
-            Argo->>Argo: diff against live state
-            alt drift detected
-                Argo->>K8s: apply or prune or sync
-                K8s->>Pod: reconcile
-                Pod-->>Argo: status
-            else in sync
-                Argo->>Argo: no-op
-            end
+    GHA->>Argo: argocd app set --kustomize-image tag=git.sha
+    GHA->>Argo: argocd app sync --prune
+    Argo->>K8s: apply Kustomize-rendered manifests
+    K8s->>Pod: rolling update
+    Pod-->>K8s: ready
+    Argo-->>GHA: argocd app wait --health
+
+    GHA->>GHA: smoke test · ZAP (dast job,<br/>read-only cluster creds)
+
+    loop continuous, independent of CI
+        Argo->>Repo: git fetch HEAD
+        Argo->>Argo: diff against live state
+        alt drift detected
+            Argo->>K8s: prune or sync (selfHeal)
+            K8s->>Pod: reconcile
+        else in sync
+            Argo->>Argo: no-op
         end
     end
 

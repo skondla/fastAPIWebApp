@@ -234,13 +234,37 @@ jobs:
 # 8. DEPLOY — GKE
 # ════════════════════════════════════════════════════════════════════════════
   deploy:
-    name: "🚀 Deploy to GKE"
+    name: "🚀 Deploy via ArgoCD"
     runs-on: ubuntu-latest
     needs: [build, container-scan, iac-scan, sign-and-sbom]
     environment: staging
     steps:
-      - uses: actions/checkout@v4
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
 
+      - name: Point ArgoCD at the new image and sync
+        env:
+          FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          argocd app set fastapi-user-gke --kustomize-image "${FASTAPI_IMAGE}"
+          argocd app sync fastapi-user-gke --prune
+          argocd app wait fastapi-user-gke --health --timeout 300
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9. DAST
+# ════════════════════════════════════════════════════════════════════════════
+  dast:
+    name: "⚡ DAST (OWASP ZAP)"
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -253,47 +277,19 @@ jobs:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location:     ${{ env.GKE_ZONE }}
 
-      - name: Apply K8s manifests
-        env:
-          FASTAPI_IMAGE: ${{ needs.build.outputs.image }}
-        run: |
-          export FASTAPI_IMAGE GKE_NAMESPACE APP_NAME APP_PORT GKE_SA
-          for manifest in \
-            gcp/gke/deploy/manifests/fastapi1/namespace.yaml \
-            gcp/gke/deploy/manifests/fastapi1/networkpolicy.yaml \
-            gcp/gke/deploy/manifests/fastapi1/secretproviderclass.yaml \
-            gcp/gke/deploy/manifests/fastapi1/configmap.yaml \
-            gcp/gke/deploy/manifests/fastapi1/deployment.yaml \
-            gcp/gke/deploy/manifests/fastapi1/service.yaml \
-            gcp/gke/deploy/manifests/fastapi1/hpa.yaml; do
-            envsubst < "$manifest" | kubectl apply -f -
-          done
-          kubectl rollout status deployment/${APP_NAME} -n ${GKE_NAMESPACE} --timeout=5m
-
-      - name: Smoke test
-        run: |
-          LB=$(kubectl get svc ${APP_NAME} -n ${GKE_NAMESPACE} \
-            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "LB IP: $LB"
-          curl -sk --max-time 30 "https://${LB}:${APP_PORT}/" \
-            | grep -i "DB Restore" && echo "✅ OK" || echo "⚠️  LB warming up"
-
-# ════════════════════════════════════════════════════════════════════════════
-# 9. DAST
-# ════════════════════════════════════════════════════════════════════════════
-  dast:
-    name: "⚡ DAST (OWASP ZAP)"
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    steps:
-      - uses: actions/checkout@v4
       - name: Get LB IP
         id: svc
         run: |
           LB=$(kubectl get svc ${APP_NAME} -n ${GKE_NAMESPACE} \
             -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "url=https://${LB}:${APP_PORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        run: |
+          curl -sk --max-time 30 "${{ steps.svc.outputs.url }}/" | grep -i "DB Restore" \
+            && echo "✅ Smoke test passed" \
+            || echo "⚠️  Smoke test inconclusive (LB may still be provisioning)"
+
       - name: OWASP ZAP Baseline
         uses: zaproxy/action-baseline@v0.12.0
         with:

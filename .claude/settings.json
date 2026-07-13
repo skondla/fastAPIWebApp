@@ -17,7 +17,14 @@
       "Bash(python3 /tmp/kustomize_convert.py)",
       "Bash(grep -rln '\\\\${[A-Z_]*}' azure/aks/deploy/manifest/fastapi1 azure/aks/deploy/manifest/fastapi-admin aws/eks/deploy/manifest/fastapi1 aws/eks/deploy/manifest/fastapi-admin gcp/gke/deploy/manifests/fastapi1 gcp/gke/deploy/manifests/fastapi-admin --include=\"*.yaml\")",
       "Bash(sed -n '/^  deploy:/,/^# ═/p' .github/workflows/devsecops-fastapi-user-aks.yml)",
-      "Bash(sed -n '/^  deploy:/,/^# ═/p' .github/workflows/devsecops-fastapi-user-eks.yml)"
+      "Bash(sed -n '/^  deploy:/,/^# ═/p' .github/workflows/devsecops-fastapi-user-eks.yml)",
+      "Bash(sed -n '/^  dast:/,/^  notify:/p' .github/workflows/devsecops-fastapi-user-eks.yml)",
+      "Bash(sed -n '/^  deploy:/,/^  notify:/p' .github/workflows/devsecops-fastapi-user-gke.yml)",
+      "Bash(sed -n '/^  dast:/,/^  notify:/p' .github/workflows/devsecops-fastapi-admin-aks.yml)",
+      "Bash(sed -n '/Smoke test/,/^  notify:/p' .github/workflows/devsecops-fastapi-admin-eks.yml)",
+      "Bash(sed -n '/Smoke test/,/^  notify:/p' .github/workflows/devsecops-fastapi-admin-gke.yml)",
+      "Bash(sed -n '/^  deploy:/,/^  notify:/p' .github/workflows/devsecops-fastapi-user-aks.yml)",
+      "Bash(sed -n '/^  deploy:/,/^  notify:/p' .github/workflows/devsecops-fastapi-admin-eks.yml)"
     ]
   }
 }
